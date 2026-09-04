@@ -79,9 +79,9 @@ if role == "Customer View":
     # Display Store Photos
     col_img1, col_img2, col_info = st.columns([1, 1, 2])
     with col_img1:
-        st.image(selected_shop["outside_photo"], caption="Outside View", use_column_width=True)
+        st.image(selected_shop["outside_photo"], caption="Outside View", use_container_width=True)
     with col_img2:
-        st.image(selected_shop["inside_photo"], caption="Inside View", use_column_width=True)
+        st.image(selected_shop["inside_photo"], caption="Inside View", use_container_width=True)
     with col_info:
         st.subheader(selected_shop["name"])
         st.write(f"📍 **Address:** {selected_shop['address']}")
