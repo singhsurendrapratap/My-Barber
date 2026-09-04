@@ -2,10 +2,14 @@ import streamlit as st
 import folium
 from streamlit_folium import st_folium
 from streamlit_js_eval import get_geolocation
+import time
 
 st.set_page_config(page_title="My Barber", page_icon="💈", layout="wide")
 
-# --- 1. INITIALIZE SESSION STATE DATA ---
+# --- 1. INITIALIZE SESSION STATE ---
+if "app_language" not in st.session_state:
+    st.session_state.app_language = "English"
+
 if "user_name" not in st.session_state:
     st.session_state.user_name = "Rahul"
 
@@ -27,11 +31,24 @@ if "user_booking" not in st.session_state:
 if "selected_shop_id" not in st.session_state:
     st.session_state.selected_shop_id = None
 
-if "app_language" not in st.session_state:
-    st.session_state.app_language = "English"
+# Registration OTP & Map Location States
+if "reg_mobile_verified" not in st.session_state:
+    st.session_state.reg_mobile_verified = False
 
-if "app_theme" not in st.session_state:
-    st.session_state.app_theme = "Light"
+if "reg_verified_mobile_num" not in st.session_state:
+    st.session_state.reg_verified_mobile_num = ""
+
+if "otp_sent_time" not in st.session_state:
+    st.session_state.otp_sent_time = 0
+
+if "reg_pin_lat" not in st.session_state:
+    st.session_state.reg_pin_lat = 23.1780
+
+if "reg_pin_lon" not in st.session_state:
+    st.session_state.reg_pin_lon = 75.7890
+
+if "reg_location_saved" not in st.session_state:
+    st.session_state.reg_location_saved = False
 
 if "owner_logged_in" not in st.session_state:
     st.session_state.owner_logged_in = False
@@ -40,7 +57,6 @@ if "logged_owner_mobile" not in st.session_state:
     st.session_state.logged_owner_mobile = None
 
 if "registered_owners" not in st.session_state:
-    # Keyed by mobile number to enforce 1 mobile = 1 shop rule
     st.session_state.registered_owners = {
         "9876543210": {
             "owner_name": "Ramesh Kumar",
@@ -89,21 +105,69 @@ if "shops" not in st.session_state:
         }
     ]
 
-# --- 2. LANGUAGE DICTIONARY HELPERS ---
+# --- 2. LANGUAGE DICTIONARIES ---
 is_hi = st.session_state.app_language == "Hindi"
 
-T = {
-    "title": "💈 My Barber" if not is_hi else "💈 माय बारबर",
-    "subtitle": "Live Wait Times • Instant Virtual Queue" if not is_hi else "लाइव प्रतीक्षा समय • त्वरित वर्चुअल कतार",
-    "menu_title": "💈 Navigation / मेनू",
-    "nav_options": [
-        "Home" if not is_hi else "होम (Home)",
-        "About" if not is_hi else "प्रोफ़ाइल (About)",
-        "My Appointments" if not is_hi else "मेरी अपॉइंटमेंट (My Appointments)",
-        "Join as Shop Owner" if not is_hi else "दुकान मालिक के रूप में जुड़ें",
-        "Settings" if not is_hi else "सेटिंग्स (Settings)"
-    ]
-}
+if is_hi:
+    T = {
+        "title": "💈 माय बारबर",
+        "subtitle": "लाइव प्रतीक्षा समय • त्वरित वर्चुअल कतार",
+        "menu_title": "💈 मेनू",
+        "nav_home": "होम",
+        "nav_about": "प्रोफ़ाइल",
+        "nav_appts": "मेरी अपॉइंटमेंट",
+        "nav_owner": "दुकान मालिक पोर्टल",
+        "nav_settings": "सेटिंग्स",
+        "close": "बंद करें",
+        "distance": "दूरी",
+        "outside": "बाहर का दृश्य",
+        "inside": "अंदर का दृश्य",
+        "curr_q": "वर्तमान कतार",
+        "waiting": "लोग प्रतीक्षा में",
+        "est_wait": "अनुमानित समय",
+        "mins": "मिनट",
+        "join_q": "कतार में शामिल हों",
+        "confirm_q": "बुकिंग की पुष्टि करें",
+        "name": "नाम",
+        "shop": "दुकान का नाम",
+        "add_group": "परिवार या दोस्तों को जोड़ें (+ अतिरिक्त सीटें)",
+        "num_persons": "व्यक्तियों की संख्या (आपके सहित):",
+        "assigned_token": "आवंटित टोकन संख्या",
+        "travel_time_prompt": "दुकान तक पहुँचने का समय (मिनट में):",
+        "confirm_btn": "पुष्टि करें और सीट बुक करें",
+        "cancel_btn": "अपॉइंटमेंट रद्द करें",
+        "cancel_reason": "रद्द करने का कारण:"
+    }
+else:
+    T = {
+        "title": "💈 My Barber",
+        "subtitle": "Live Wait Times • Instant Virtual Queue",
+        "menu_title": "💈 Navigation",
+        "nav_home": "Home",
+        "nav_about": "About",
+        "nav_appts": "My Appointments",
+        "nav_owner": "Join as Shop Owner",
+        "nav_settings": "Settings",
+        "close": "Close",
+        "distance": "Distance",
+        "outside": "Outside View",
+        "inside": "Inside View",
+        "curr_q": "Current Queue",
+        "waiting": "waiting",
+        "est_wait": "Approx. Wait",
+        "mins": "mins",
+        "join_q": "Join Virtual Queue",
+        "confirm_q": "Confirm Queue Entry",
+        "name": "Name",
+        "shop": "Shop Name",
+        "add_group": "Add family or friends (+ extra seats)",
+        "num_persons": "Number of persons (including you):",
+        "assigned_token": "Exact Assigned Queue Number",
+        "travel_time_prompt": "Enter your travel time to reach shop (in minutes):",
+        "confirm_btn": "Confirm & Book Seat",
+        "cancel_btn": "Cancel Appointment",
+        "cancel_reason": "Reason for cancellation:"
+    }
 
 # --- HEADER ---
 st.markdown(f"<h2 style='text-align: center; margin-bottom: 0px;'>{T['title']}</h2>", unsafe_allow_html=True)
@@ -111,7 +175,7 @@ st.markdown(f"<p style='text-align: center; font-size: 13px; color: gray;'>{T['s
 
 # --- SIDEBAR MENU ---
 st.sidebar.title(T["menu_title"])
-selected_menu = st.sidebar.radio("Go to:", T["nav_options"])
+nav_selection = st.sidebar.radio("Go to:", [T["nav_home"], T["nav_about"], T["nav_appts"], T["nav_owner"], T["nav_settings"]])
 
 def get_badge_color(count, is_user_booked=False):
     if is_user_booked:
@@ -119,14 +183,14 @@ def get_badge_color(count, is_user_booked=False):
     if count <= 5:
         return "#2E7D32" # Green
     elif count <= 10:
-        return "#F57C00" # Yellow/Orange
+        return "#F57C00" # Orange
     else:
         return "#D32F2F" # Red
 
 # ==========================================
-# 1. HOME VIEW (CUSTOMER MAIN MAP)
+# 1. HOME VIEW (MAIN MAP)
 # ==========================================
-if "Home" in selected_menu or "होम" in selected_menu:
+if nav_selection == T["nav_home"]:
     loc = get_geolocation()
     user_lat, user_lon = 23.1765, 75.7885
     if loc and "coords" in loc:
@@ -135,14 +199,12 @@ if "Home" in selected_menu or "होम" in selected_menu:
 
     m = folium.Map(location=[user_lat, user_lon], zoom_start=14)
     
-    # User Location Marker
     folium.Marker(
         [user_lat, user_lon], 
         tooltip="आप यहाँ हैं" if is_hi else "You are here",
         icon=folium.Icon(color="cadetblue", icon="user", prefix="fa")
     ).add_to(m)
 
-    # Render Shop Pins with Clean Dynamic Static Badges
     for shop in st.session_state.shops:
         count = len(shop["queue"])
         has_user = st.session_state.user_booking and st.session_state.user_booking["shop_id"] == shop["id"]
@@ -183,7 +245,6 @@ if "Home" in selected_menu or "होम" in selected_menu:
             if abs(s["lat"] - clicked_lat) < 0.005 and abs(s["lon"] - clicked_lon) < 0.005:
                 st.session_state.selected_shop_id = s["id"]
 
-    # --- SHOP DETAILS PANEL ---
     if st.session_state.selected_shop_id:
         selected_shop = next((s for s in st.session_state.shops if s["id"] == st.session_state.selected_shop_id), None)
         
@@ -196,40 +257,40 @@ if "Home" in selected_menu or "होम" in selected_menu:
             with head_col1:
                 st.subheader(f"💈 {s_title}")
             with head_col2:
-                if st.button("✖️ " + ("बंद करें" if is_hi else "Close"), key="close_shop_details"):
+                if st.button(f"✖️ {T['close']}", key="close_shop_details"):
                     st.session_state.selected_shop_id = None
                     st.rerun()
 
-            st.write(f"📍 **{'दूरी' if is_hi else 'Distance'}:** {selected_shop['distance']} | {s_addr}")
+            st.write(f"📍 **{T['distance']}:** {selected_shop['distance']} | {s_addr}")
 
             img_col1, img_col2 = st.columns(2)
             with img_col1:
-                st.image(selected_shop["outside_photo"], caption="बाहर का दृश्य" if is_hi else "Outside View", use_container_width=True)
+                st.image(selected_shop["outside_photo"], caption=T['outside'], use_container_width=True)
             with img_col2:
-                st.image(selected_shop["inside_photo"], caption="अंदर का दृश्य" if is_hi else "Inside View", use_container_width=True)
+                st.image(selected_shop["inside_photo"], caption=T['inside'], use_container_width=True)
 
             q_count = len(selected_shop["queue"])
             est_wait = q_count * selected_shop["avg_time_per_cut"]
             has_booking_here = st.session_state.user_booking and st.session_state.user_booking["shop_id"] == selected_shop["id"]
 
             if has_booking_here:
-                st.info(f"🔵 **{'आपकी बुक की गई सीट' if is_hi else 'YOUR BOOKED SEAT(S)'}:** {st.session_state.user_booking['token_label']}")
+                st.info(f"🔵 **{'आपकी टोकन संख्या' if is_hi else 'YOUR BOOKED SEAT'}:** {st.session_state.user_booking['token_label']}")
             else:
-                st.write(f"👥 **{'वर्तमान कतार' if is_hi else 'Current Queue'}:** `{q_count} {'लोग प्रतीक्षा में' if is_hi else 'waiting'}` | ⏱️ **{'अनुमानित समय' if is_hi else 'Approx. Wait'}:** `{est_wait} {'मिनट' if is_hi else 'mins'}`")
+                st.write(f"👥 **{T['curr_q']}:** `{q_count} {T['waiting']}` | ⏱️ **{T['est_wait']}:** `{est_wait} {T['mins']}`")
                 
-                if st.button("➕ " + ("कतार में शामिल हों" if is_hi else "Join Virtual Queue"), type="primary"):
+                if st.button(f"➕ {T['join_q']}", type="primary"):
                     st.session_state[f"show_confirm_{selected_shop['id']}"] = True
 
                 if st.session_state.get(f"show_confirm_{selected_shop['id']}", False):
                     with st.form(f"confirm_booking_form_{selected_shop['id']}"):
-                        st.markdown("### 📋 " + ("बुकिंग की पुष्टि करें" if is_hi else "Confirm Queue Entry"))
-                        st.write(f"👤 **{'नाम' if is_hi else 'Name'}:** {st.session_state.user_profile['name']}")
-                        st.write(f"💈 **{'दुकान' if is_hi else 'Shop Name'}:** {s_title}")
+                        st.markdown(f"### 📋 {T['confirm_q']}")
+                        st.write(f"👤 **{T['name']}:** {st.session_state.user_profile['name']}")
+                        st.write(f"💈 **{T['shop']}:** {s_title}")
                         
-                        add_group = st.checkbox("परिवार या दोस्तों को जोड़ें (+ अतिरिक्त सीटें)" if is_hi else "Add family or friends (+ extra seats)")
+                        add_group = st.checkbox(T['add_group'])
                         num_people = 1
                         if add_group:
-                            num_people = st.number_input("व्यक्तियों की संख्या (आपके सहित):" if is_hi else "Number of persons (including you):", min_value=2, max_value=6, value=2, step=1)
+                            num_people = st.number_input(T['num_persons'], min_value=2, max_value=6, value=2, step=1)
                         
                         start_token = len(selected_shop["queue"]) + 20
                         if num_people == 1:
@@ -238,12 +299,12 @@ if "Home" in selected_menu or "होम" in selected_menu:
                             end_token = start_token + num_people - 1
                             token_label = f"Tokens #{start_token} to #{end_token}"
                             
-                        st.write(f"🔢 **{'आवंटित टोकन संख्या' if is_hi else 'Exact Assigned Queue Number'}:** `{token_label}`")
-                        reach_time = st.number_input("दुकान तक पहुँचने का समय (मिनट में):" if is_hi else "Enter your travel time to reach shop (in minutes):", min_value=5, max_value=60, value=None, placeholder="e.g. 15")
+                        st.write(f"🔢 **{T['assigned_token']}:** `{token_label}`")
+                        reach_time = st.number_input(T['travel_time_prompt'], min_value=5, max_value=60, value=None, placeholder="e.g. 15")
 
-                        if st.form_submit_button("पुष्टि करें और सीट बुक करें" if is_hi else "Confirm & Book Seat"):
+                        if st.form_submit_button(T['confirm_btn']):
                             if reach_time is None:
-                                st.error("कृपया पुष्टि करने से पहले अपना यात्रा समय दर्ज करें।" if is_hi else "Please fill in your estimated travel time before confirming.")
+                                st.error("कृपया यात्रा समय दर्ज करें।" if is_hi else "Please enter travel time.")
                             else:
                                 for i in range(num_people):
                                     t_num = start_token + i
@@ -262,39 +323,38 @@ if "Home" in selected_menu or "होम" in selected_menu:
                                     "lon": selected_shop["lon"]
                                 }
                                 st.session_state[f"show_confirm_{selected_shop['id']}"] = False
-                                st.success(f"सीट बुक हो गई! reserved: {token_label}" if is_hi else f"Seat(s) Booked Successfully! Reserved: {token_label}")
+                                st.success(f"सीट बुक हो गई: {token_label}" if is_hi else f"Seat Booked: {token_label}")
                                 st.rerun()
 
 # ==========================================
-# 2. ABOUT (CUSTOMER PROFILE VIEW)
+# 2. ABOUT (PROFILE VIEW)
 # ==========================================
-elif "About" in selected_menu or "प्रोफ़ाइल" in selected_menu:
-    st.title("👤 " + ("उपयोगकर्ता प्रोफ़ाइल (About)" if is_hi else "Customer Profile (About)"))
-    st.write("अपने विवरण देखें और अपडेट करें:" if is_hi else "View and manage your personal details:")
+elif nav_selection == T["nav_about"]:
+    st.title("👤 " + ("उपयोगकर्ता प्रोफ़ाइल" if is_hi else "User Profile"))
 
     p = st.session_state.user_profile
 
     if not st.session_state.profile_edit_mode:
-        st.info(f"👤 **{'नाम (Name)' if is_hi else 'Name'}:** {p['name']}")
-        st.write(f"🎂 **{'आयु (Age)' if is_hi else 'Age'}:** {p['age'] if p['age'] else 'Not set'}")
-        st.write(f"📱 **{'मोबाइल नंबर (Mobile)' if is_hi else 'Mobile Number'}:** {p['mobile'] if p['mobile'] else 'Not set'}")
-        st.write(f"📧 **{'ईमेल (Email)' if is_hi else 'Email Address'}:** {p['email'] if p['email'] else 'Not set'}")
-        st.write(f"🏠 **{'घर का पता (Home Address)' if is_hi else 'Home Address'}:** {p['address'] if p['address'] else 'Not set'}")
+        st.info(f"👤 **{'नाम' if is_hi else 'Name'}:** {p['name']}")
+        st.write(f"🎂 **{'आयु' if is_hi else 'Age'}:** {p['age'] if p['age'] else 'Not set'}")
+        st.write(f"📱 **{'मोबाइल नंबर' if is_hi else 'Mobile Number'}:** {p['mobile'] if p['mobile'] else 'Not set'}")
+        st.write(f"📧 **{'ईमेल' if is_hi else 'Email'}:** {p['email'] if p['email'] else 'Not set'}")
+        st.write(f"🏠 **{'पता' if is_hi else 'Address'}:** {p['address'] if p['address'] else 'Not set'}")
         
         st.divider()
-        if st.button("✏️ " + ("विवरण संपादित करें" if is_hi else "Edit Details")):
+        if st.button("✏️ " + ("संपादित करें" if is_hi else "Edit Details")):
             st.session_state.profile_edit_mode = True
             st.rerun()
     else:
         with st.form("edit_profile_form"):
             st.subheader("✏️ " + ("विवरण अपडेट करें" if is_hi else "Update Details"))
-            new_name = st.text_input("नाम (Name)*", value=p["name"])
-            new_age = st.text_input("आयु (Age)", value=p["age"])
-            new_mobile = st.text_input("मोबाइल नंबर (Mobile Number)", value=p["mobile"])
-            new_email = st.text_input("ईमेल (Email Address)", value=p["email"])
-            new_address = st.text_area("घर का पता (Home Address)", value=p["address"])
+            new_name = st.text_input("नाम / Name*", value=p["name"])
+            new_age = st.text_input("आयु / Age", value=p["age"])
+            new_mobile = st.text_input("मोबाइल / Mobile", value=p["mobile"])
+            new_email = st.text_input("ईमेल / Email", value=p["email"])
+            new_address = st.text_area("पता / Address", value=p["address"])
 
-            if st.form_submit_button("💾 " + ("विवरण सहेजें" if is_hi else "Save Details")):
+            if st.form_submit_button("💾 " + ("सहेजें" if is_hi else "Save Details")):
                 if new_name.strip():
                     st.session_state.user_profile = {
                         "name": new_name.strip(),
@@ -305,7 +365,7 @@ elif "About" in selected_menu or "प्रोफ़ाइल" in selected_menu:
                     }
                     st.session_state.user_name = new_name.strip()
                     st.session_state.profile_edit_mode = False
-                    st.success("विवरण सफलतापूर्वक सहेजे गए!" if is_hi else "Details saved successfully!")
+                    st.success("विवरण सहेजे गए!" if is_hi else "Details saved!")
                     st.rerun()
                 else:
                     st.error("नाम अनिवार्य है।" if is_hi else "Name is required.")
@@ -313,7 +373,7 @@ elif "About" in selected_menu or "प्रोफ़ाइल" in selected_menu:
 # ==========================================
 # 3. MY APPOINTMENTS VIEW
 # ==========================================
-elif "My Appointments" in selected_menu or "मेरी अपॉइंटमेंट" in selected_menu:
+elif nav_selection == T["nav_appts"]:
     st.title("📋 " + ("मेरी अपॉइंटमेंट" if is_hi else "My Active Appointments"))
     
     if st.session_state.user_booking:
@@ -322,57 +382,57 @@ elif "My Appointments" in selected_menu or "मेरी अपॉइंटम�
         st.info(f"### 💈 {b['shop_name']}")
         col_a, col_b = st.columns(2)
         with col_a:
-            st.markdown(f"🔵 **{'टोकन नंबर' if is_hi else 'Your Queue Token'}:** <h2 style='color: #1E88E5; display: inline;'>{b['token_label']}</h2>", unsafe_allow_html=True)
-            st.write(f"👥 **{'कुल सीटें' if is_hi else 'Total Reserved'}:** {b['num_people']}")
+            st.markdown(f"🔵 **{'टोकन' if is_hi else 'Queue Token'}:** <h2 style='color: #1E88E5; display: inline;'>{b['token_label']}</h2>", unsafe_allow_html=True)
+            st.write(f"👥 **{'सीटें' if is_hi else 'Reserved'}:** {b['num_people']}")
             st.write(f"📍 **{'पता' if is_hi else 'Address'}:** {b['address']}")
-            st.write(f"⏱️ **{'यात्रा का समय' if is_hi else 'Your Travel Time'}:** {b['travel_time']} mins")
+            st.write(f"⏱️ **{'समय' if is_hi else 'Travel Time'}:** {b['travel_time']} mins")
             st.write(f"📏 **{'दूरी' if is_hi else 'Distance'}:** {b['distance']}")
         
         with col_b:
-            st.subheader("🧭 " + ("लाइव नेविगेशन" if is_hi else "In-App Live Route"))
+            st.subheader("🧭 " + ("नेविगेशन" if is_hi else "In-App Route Map"))
             route_map = folium.Map(location=[b['lat'], b['lon']], zoom_start=14)
-            folium.Marker([23.1765, 75.7885], popup="Your Location", icon=folium.Icon(color="blue", icon="user", prefix="fa")).add_to(route_map)
+            folium.Marker([23.1765, 75.7885], popup="You", icon=folium.Icon(color="blue", icon="user", prefix="fa")).add_to(route_map)
             folium.Marker([b['lat'], b['lon']], popup=b['shop_name'], icon=folium.Icon(color="red", icon="cut", prefix="fa")).add_to(route_map)
             folium.PolyLine([(23.1765, 75.7885), (b['lat'], b['lon'])], color="#1E88E5", weight=4, opacity=0.8).add_to(route_map)
             st_folium(route_map, width=450, height=220)
 
         st.divider()
-        st.subheader("❌ " + ("अपॉइंटमेंट रद्द करें" if is_hi else "Cancel Appointment"))
-        with st.expander("रद्द करें (Cancel)"):
-            cancel_reason_app = st.text_input("रद्द करने का कारण:" if is_hi else "Reason for cancellation:", key="cancel_app_input")
-            if st.button("पुष्टि करें और रद्द करें" if is_hi else "Confirm & Cancel Appointment", type="primary"):
+        st.subheader(f"❌ {T['cancel_btn']}")
+        with st.expander(T['cancel_btn']):
+            cancel_reason_app = st.text_input(T['cancel_reason'], key="cancel_app_input")
+            if st.button(T['cancel_btn'], type="primary"):
                 if cancel_reason_app.strip():
                     target_shop = next((s for s in st.session_state.shops if s["id"] == b["shop_id"]), None)
                     if target_shop:
                         target_shop["queue"] = [q for q in target_shop["queue"] if st.session_state.user_profile["name"] not in q]
                     st.session_state.user_booking = None
-                    st.success("अपॉइंटमेंट सफलतापूर्वक रद्द कर दी गई।" if is_hi else "Appointment cancelled successfully.")
+                    st.success("अपॉइंटमेंट रद्द हो गई।" if is_hi else "Appointment cancelled.")
                     st.rerun()
                 else:
-                    st.warning("कृपया रद्द करने का कारण दर्ज करें।" if is_hi else "Please provide a reason before cancelling.")
+                    st.warning("कारण दर्ज करें।" if is_hi else "Please provide a reason.")
     else:
-        st.warning("आपकी कोई सक्रिय अपॉइंटमेंट नहीं है।" if is_hi else "You do not have any active appointment booked right now.")
+        st.warning("कोई सक्रिय अपॉइंटमेंट नहीं है।" if is_hi else "No active appointment.")
 
 # ==========================================
 # 4. JOIN AS SHOP OWNER VIEW
 # ==========================================
-elif "Shop Owner" in selected_menu or "दुकान मालिक" in selected_menu:
-    st.title("✂️ " + ("दुकान मालिक पोर्टल" if is_hi else "Barber Shop Owner Portal"))
+elif nav_selection == T["nav_owner"]:
+    st.title("✂️ " + ("दुकान मालिक पोर्टल" if is_hi else "Barber Owner Portal"))
 
     if not st.session_state.owner_logged_in:
-        tab_login, tab_register = st.tabs(["🔐 Login (लॉग इन)", "📝 Register as New (नया पंजीकरण)"])
+        tab_login, tab_register = st.tabs(["🔐 " + ("लॉग इन" if is_hi else "Login"), "📝 " + ("नया पंजीकरण" if is_hi else "Register New Shop")])
 
-        # LOGIN TAB (MOBILE OTP)
+        # LOGIN TAB
         with tab_login:
             st.subheader("🔑 Login with Mobile OTP")
-            login_mobile = st.text_input("Mobile Number (पंजीकृत मोबाइल नंबर):", key="login_mob")
+            login_mobile = st.text_input("Mobile Number:", key="login_mob")
             
-            if st.button("Send OTP"):
+            if st.button("Send Login OTP"):
                 if login_mobile in st.session_state.registered_owners:
                     st.session_state["otp_sent_login"] = True
-                    st.success("OTP sent to your registered mobile: 1234 (Demo)")
+                    st.success("OTP sent to mobile: 1234 (Demo)")
                 else:
-                    st.error("Mobile number not registered! Please register as a new shop first.")
+                    st.error("Mobile number not registered!")
 
             if st.session_state.get("otp_sent_login", False):
                 entered_otp = st.text_input("Enter 4-Digit OTP:", key="login_otp", type="password")
@@ -385,56 +445,126 @@ elif "Shop Owner" in selected_menu or "दुकान मालिक" in selec
                     else:
                         st.error("Invalid OTP!")
 
-        # REGISTER TAB (1 MOBILE = 1 SHOP RULE)
+        # REGISTER TAB (STEP-BY-STEP OTP + INTERACTIVE MAP PIN)
         with tab_register:
-            st.subheader("📝 Register New Shop (1 Mobile Number = 1 Shop)")
-            st.caption("All fields marked with * are compulsory.")
+            st.subheader("📝 Register New Shop")
+            st.caption("1 Mobile Number = 1 Shop Rule")
 
-            with st.form("register_shop_form"):
-                o_name = st.text_input("Owner Name (मालिक का नाम)*", value=st.session_state.user_profile["name"])
-                o_gender = st.selectbox("Gender (लिंग)*", ["Male", "Female", "Other"])
-                o_age = st.number_input("Age (आयु)*", min_value=18, max_value=80, value=30)
+            # --- STEP 1: MOBILE OTP VERIFICATION ---
+            st.markdown("#### Step 1: Mobile Verification")
+            col_mob1, col_mob2 = st.columns([3, 1])
+            with col_mob1:
+                reg_mobile_input = st.text_input("Mobile Number*", value=st.session_state.reg_verified_mobile_num, disabled=st.session_state.reg_mobile_verified)
+            with col_mob2:
+                st.write(" ")
+                st.write(" ")
+                current_time = time.time()
+                time_since_otp = current_time - st.session_state.otp_sent_time
+
+                if not st.session_state.reg_mobile_verified:
+                    if time_since_otp > 120 or st.session_state.otp_sent_time == 0:
+                        if st.button("Send OTP"):
+                            if len(reg_mobile_input.strip()) >= 10:
+                                if reg_mobile_input.strip() in st.session_state.registered_owners:
+                                    st.error("Mobile already registered!")
+                                else:
+                                    st.session_state.otp_sent_time = time.time()
+                                    st.session_state["otp_sent_reg"] = True
+                                    st.success("OTP sent: 1234")
+                            else:
+                                st.error("Enter valid 10-digit number.")
+                    else:
+                        remaining_seconds = int(120 - time_since_otp)
+                        st.info(f"Resend in {remaining_seconds}s")
+
+            if st.session_state.get("otp_sent_reg", False) and not st.session_state.reg_mobile_verified:
+                reg_otp_entered = st.text_input("Enter Received OTP (1234):", type="password", key="reg_otp_input")
+                if st.button("Verify OTP"):
+                    if reg_otp_entered == "1234":
+                        st.session_state.reg_mobile_verified = True
+                        st.session_state.reg_verified_mobile_num = reg_mobile_input.strip()
+                        st.success("Mobile Verified Successfully! ✅")
+                        st.rerun()
+                    else:
+                        st.error("Incorrect OTP!")
+
+            if st.session_state.reg_mobile_verified:
+                st.success(f"Verified Mobile: {st.session_state.reg_verified_mobile_num} ✅")
+
+            st.divider()
+
+            # --- STEP 2: REGISTRATION FORM ---
+            st.markdown("#### Step 2: Shop Details & Location Pinpoint")
+
+            if not st.session_state.reg_mobile_verified:
+                st.warning("⚠️ Please complete Step 1 Mobile Verification above to unlock registration form.")
+            else:
+                o_name = st.text_input("Owner Name*", value=st.session_state.user_profile["name"])
+                o_gender = st.selectbox("Gender*", ["Male", "Female", "Other"])
+                o_age = st.number_input("Age*", min_value=18, max_value=80, value=30)
+                s_name = st.text_input("Shop Name*")
                 
-                o_mobile = st.text_input("Mobile Number (OTP Verification Required)*")
-                s_name = st.text_input("Shop Name (दुकान का नाम)*")
-                
-                st.write("Payment Options Accepted (भुगतान के तरीके)*:")
+                st.write("Payment Options Accepted*:")
                 p_offline = st.checkbox("Offline Cash", value=True)
                 p_online = st.checkbox("Online UPI/Card", value=True)
                 
-                s_address = st.text_area("Shop Address (दुकान का पूरा पता)*")
+                s_address = st.text_area("Shop Address*")
                 s_outside = st.text_input("Outside Photo URL*", value="https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=400")
                 s_inside = st.text_input("Inside Photo URL*", value="https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=400")
-                
-                st.write("Locate via Map (GPS Coordinates)*:")
-                s_lat = st.number_input("Latitude", value=23.1780, format="%.4f")
-                s_lon = st.number_input("Longitude", value=75.7890, format="%.4f")
 
-                submit_reg = st.form_submit_button("Save & Register Shop")
+                st.write("📍 **Pinpoint Shop Location on Map***")
+                st.caption("Device GPS fetches location automatically. Click/Tap anywhere on the map to adjust pinpoint.")
 
-                if submit_reg:
-                    if not o_mobile.strip() or not s_name.strip() or not s_address.strip():
+                loc_reg = get_geolocation()
+                init_lat, init_lon = 23.1780, 75.7890
+                if loc_reg and "coords" in loc_reg:
+                    init_lat = loc_reg["coords"]["latitude"]
+                    init_lon = loc_reg["coords"]["longitude"]
+
+                picker_map = folium.Map(location=[st.session_state.reg_pin_lat, st.session_state.reg_pin_lon], zoom_start=15)
+                folium.Marker(
+                    [st.session_state.reg_pin_lat, st.session_state.reg_pin_lon],
+                    popup="Shop Pinpoint",
+                    draggable=True,
+                    icon=folium.Icon(color="red", icon="cut", prefix="fa")
+                ).add_to(picker_map)
+
+                map_click_data = st_folium(picker_map, width=700, height=300)
+
+                if map_click_data and map_click_data.get("last_clicked"):
+                    st.session_state.reg_pin_lat = map_click_data["last_clicked"]["lat"]
+                    st.session_state.reg_pin_lon = map_click_data["last_clicked"]["lng"]
+
+                if st.button("📌 Save Location Pinpoint"):
+                    st.session_state.reg_location_saved = True
+                    st.success(f"Location Saved: ({st.session_state.reg_pin_lat:.4f}, {st.session_state.reg_pin_lon:.4f})")
+
+                st.divider()
+
+                if st.button("Save & Register Shop", type="primary"):
+                    if not s_name.strip() or not s_address.strip():
                         st.error("Please fill all compulsory star-marked fields!")
-                    elif o_mobile in st.session_state.registered_owners:
-                        st.error("This Mobile Number is already registered with another shop! (1 Mobile = 1 Shop Rule)")
+                    elif not st.session_state.reg_location_saved:
+                        st.error("Please click 'Save Location Pinpoint' on map before submitting.")
                     else:
-                        # Register New Shop
                         new_id = len(st.session_state.shops) + 1
                         payments = []
                         if p_offline: payments.append("Offline")
                         if p_online: payments.append("Online")
 
-                        st.session_state.registered_owners[o_mobile] = {
+                        v_mob = st.session_state.reg_verified_mobile_num
+
+                        st.session_state.registered_owners[v_mob] = {
                             "owner_name": o_name,
                             "gender": o_gender,
                             "age": o_age,
-                            "mobile": o_mobile,
+                            "mobile": v_mob,
                             "shop_name": s_name,
                             "shop_name_hi": s_name,
                             "payment": payments,
                             "address": s_address,
-                            "lat": s_lat,
-                            "lon": s_lon,
+                            "lat": st.session_state.reg_pin_lat,
+                            "lon": st.session_state.reg_pin_lon,
                             "shop_id": new_id
                         }
 
@@ -442,8 +572,8 @@ elif "Shop Owner" in selected_menu or "दुकान मालिक" in selec
                             "id": new_id,
                             "name": s_name,
                             "name_hi": s_name,
-                            "lat": s_lat,
-                            "lon": s_lon,
+                            "lat": st.session_state.reg_pin_lat,
+                            "lon": st.session_state.reg_pin_lon,
                             "address": s_address,
                             "address_hi": s_address,
                             "distance": "1.0 km",
@@ -454,7 +584,9 @@ elif "Shop Owner" in selected_menu or "दुकान मालिक" in selec
                         })
 
                         st.session_state.owner_logged_in = True
-                        st.session_state.logged_owner_mobile = o_mobile
+                        st.session_state.logged_owner_mobile = v_mob
+                        st.session_state.reg_mobile_verified = False
+                        st.session_state.reg_location_saved = False
                         st.success("Shop Registered Successfully!")
                         st.rerun()
 
@@ -499,38 +631,26 @@ elif "Shop Owner" in selected_menu or "दुकान मालिक" in selec
 # ==========================================
 # 5. SETTINGS VIEW
 # ==========================================
-elif "Settings" in selected_menu or "सेटिंग्स" in selected_menu:
-    st.title("⚙️ " + ("सेटिंग्स (Settings)" if is_hi else "App Settings"))
+elif nav_selection == T["nav_settings"]:
+    st.title("⚙️ " + ("सेटिंग्स" if is_hi else "App Settings"))
 
     # Language Toggle
     st.subheader("🌐 Language / भाषा")
-    lang_choice = st.radio("Select Language:", ["English", "Hindi (हिंदी)"], index=0 if st.session_state.app_language == "English" else 1)
-    if lang_choice != ("English" if st.session_state.app_language == "English" else "Hindi (हिंदी)"):
-        st.session_state.app_language = "English" if "English" in lang_choice else "Hindi"
+    lang_choice = st.radio("Select Language / भाषा चुनें:", ["English", "Hindi"], index=0 if st.session_state.app_language == "English" else 1)
+    if lang_choice != st.session_state.app_language:
+        st.session_state.app_language = lang_choice
         st.rerun()
 
     st.divider()
 
-    # Theme Toggle
-    st.subheader("🎨 Theme / थीम")
-    theme_choice = st.radio("Select Theme:", ["Normal (Light)", "Dark"], index=0 if st.session_state.app_theme == "Light" else 1)
-    if "Dark" in theme_choice and st.session_state.app_theme != "Dark":
-        st.session_state.app_theme = "Dark"
-        st.info("Dark theme style preference updated.")
-    elif "Normal" in theme_choice and st.session_state.app_theme != "Light":
-        st.session_state.app_theme = "Light"
-        st.info("Light theme style preference updated.")
-
-    st.divider()
-
     # Logout Option for Shop Owners
-    st.subheader("🚪 Account / लॉग आउट")
+    st.subheader("🚪 " + ("लॉग आउट" if is_hi else "Account / Logout"))
     if st.session_state.owner_logged_in:
-        st.write("You are currently logged in as a Shop Owner.")
-        if st.button("Log Out as Shop Owner", type="primary"):
+        st.write("आप दुकान मालिक के रूप में लॉग इन हैं।" if is_hi else "You are logged in as a Shop Owner.")
+        if st.button("लॉग आउट करें" if is_hi else "Log Out as Shop Owner", type="primary"):
             st.session_state.owner_logged_in = False
             st.session_state.logged_owner_mobile = None
-            st.success("Logged out successfully. Returned to Customer Mode.")
+            st.success("लॉग आउट हो गए।" if is_hi else "Logged out successfully.")
             st.rerun()
     else:
-        st.write("Currently active as Customer (No login required for customers).")
+        st.write("ग्राहक मोड सक्रिय है।" if is_hi else "Active in Customer Mode (No login required).")
