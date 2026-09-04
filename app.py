@@ -8,10 +8,10 @@ import random
 
 st.set_page_config(page_title="My Barber", page_icon="💈", layout="wide")
 
-# Helper function to calculate distance in meters/kilometers
+# Helper function to calculate exact distance in meters
 def calculate_haversine_distance(lat1, lon1, lat2, lon2):
     if None in (lat1, lon1, lat2, lon2):
-        return 0, "0 m"
+        return 999999, "Unknown"
     R = 6371000  # Earth radius in meters
     dLat = radians(lat2 - lat1)
     dLon = radians(lon2 - lon1)
@@ -110,13 +110,13 @@ if "shops" not in st.session_state:
     st.session_state.shops = [
         {
             "id": 1,
+            "owner_mobile": "9876543210",
             "name": "Royal Cut Salon",
             "name_hi": "रॉयल कट सलून",
             "lat": 23.1765,
             "lon": 75.7885,
             "address": "Main Market, Clock Tower, Ujjain, MP, India",
             "address_hi": "मुख्य बाजार, क्लॉक टावर, उज्जैन, म.प्र., भारत",
-            "distance": "1.2 km",
             "outside_photo": "https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=400",
             "inside_photo": "https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=400",
             "avg_time_per_cut": 20,
@@ -124,21 +124,44 @@ if "shops" not in st.session_state:
         },
         {
             "id": 2,
+            "owner_mobile": "9999999999",
             "name": "Classic Barber Hub",
             "name_hi": "क्लासिक बारबर हब",
             "lat": 23.1810,
             "lon": 75.7920,
             "address": "Station Road, Opposite Bank, Ujjain, MP, India",
             "address_hi": "स्टेशन रोड, बैंक के सामने, उज्जैन, म.प्र., भारत",
-            "distance": "2.5 km",
             "outside_photo": "https://images.unsplash.com/photo-1622286342621-4bd786c2447c?w=400",
             "inside_photo": "https://images.unsplash.com/photo-1599351431202-1e0f0137899a?w=400",
             "avg_time_per_cut": 25,
-            "queue": ["Deepak (Token #11)", "Sanjay (Token #12)", "Pooja (Token #13)", "Rohan (Token #14)", "Karan (Token #15)", "Manoj (Token #16)"]
+            "queue": ["Deepak (Token #11)", "Sanjay (Token #12)", "Pooja (Token #13)"]
         }
     ]
 
-# --- 2. LANGUAGE DICTIONARIES ---
+# --- 2. GET CURRENT DEVICE GEOLOCATION ---
+loc_data = get_geolocation()
+device_lat, device_lon = 23.1780, 75.7890
+if loc_data and "coords" in loc_data:
+    device_lat = loc_data["coords"]["latitude"]
+    device_lon = loc_data["coords"]["longitude"]
+
+# --- 3. DYNAMICALLY EVALUATE SHOP OPEN/CLOSED STATUS (10 METERS PROXIMITY RULE) ---
+for shop in st.session_state.shops:
+    owner_mob = shop.get("owner_mobile")
+    # Rule: Active owner app session AND owner within 10 meters of fixed registered shop location
+    if st.session_state.owner_logged_in and st.session_state.logged_owner_mobile == owner_mob:
+        dist_m, dist_lbl = calculate_haversine_distance(device_lat, device_lon, shop["lat"], shop["lon"])
+        if dist_m <= 10.0:
+            shop["is_open"] = True
+            shop["status_reason"] = "Owner at shop (within 10m)"
+        else:
+            shop["is_open"] = False
+            shop["status_reason"] = f"Owner is away ({dist_lbl} from shop)"
+    else:
+        shop["is_open"] = False
+        shop["status_reason"] = "Owner inactive/offline"
+
+# --- 4. LANGUAGE DICTIONARIES ---
 is_hi = st.session_state.app_language == "Hindi"
 
 if is_hi:
@@ -210,7 +233,9 @@ st.markdown(f"<p style='text-align: center; font-size: 13px; color: gray;'>{T['s
 st.sidebar.title(T["menu_title"])
 nav_selection = st.sidebar.radio("Go to:", [T["nav_home"], T["nav_about"], T["nav_appts"], T["nav_owner"], T["nav_settings"]])
 
-def get_badge_color(count, is_user_booked=False):
+def get_badge_color(count, is_open=True, is_user_booked=False):
+    if not is_open:
+        return "#757575" # Gray for Closed
     if is_user_booked:
         return "#1E88E5" # Blue
     if count <= 5:
@@ -224,29 +249,28 @@ def get_badge_color(count, is_user_booked=False):
 # 1. HOME VIEW (MAIN MAP)
 # ==========================================
 if nav_selection == T["nav_home"]:
-    loc = get_geolocation()
-    user_lat, user_lon = 23.1765, 75.7885
-    if loc and "coords" in loc:
-        user_lat = loc["coords"]["latitude"]
-        user_lon = loc["coords"]["longitude"]
-
-    m = folium.Map(location=[user_lat, user_lon], zoom_start=15, tiles="OpenStreetMap")
+    m = folium.Map(location=[device_lat, device_lon], zoom_start=15, tiles="OpenStreetMap")
     
     folium.Marker(
-        [user_lat, user_lon], 
-        tooltip="आप यहाँ हैं" if is_hi else "You are here",
+        [device_lat, device_lon], 
+        tooltip="आप यहाँ हैं" if is_hi else "Your Device Location",
         icon=folium.Icon(color="cadetblue", icon="user", prefix="fa")
     ).add_to(m)
 
     for shop in st.session_state.shops:
         count = len(shop["queue"])
         has_user = st.session_state.user_booking and st.session_state.user_booking["shop_id"] == shop["id"]
-        color_code = get_badge_color(count, is_user_booked=has_user)
+        is_shop_open = shop.get("is_open", False)
+        color_code = get_badge_color(count, is_open=is_shop_open, is_user_booked=has_user)
         
         s_name = shop["name_hi"] if is_hi else shop["name"]
-        label_text = f"{s_name} | Q: {count}"
-        if has_user:
-            label_text = f"🔵 {s_name} | {st.session_state.user_booking['token_label']}"
+        
+        if is_shop_open:
+            label_text = f"🟢 OPEN | {s_name} | Q: {count}"
+            if has_user:
+                label_text = f"🔵 {s_name} | {st.session_state.user_booking['token_label']}"
+        else:
+            label_text = f"🔴 CLOSED | {s_name}"
 
         icon_html = f"""
         <div style="
@@ -263,9 +287,10 @@ if nav_selection == T["nav_home"]:
         </div>
         """
         
+        # Lock marker to the fixed registered shop coordinates
         folium.Marker(
             [shop["lat"], shop["lon"]],
-            icon=folium.DivIcon(html=icon_html, icon_size=(120, 36), icon_anchor=(60, 18))
+            icon=folium.DivIcon(html=icon_html, icon_size=(130, 36), icon_anchor=(65, 18))
         ).add_to(m)
 
     map_data = st_folium(m, width=1000, height=380)
@@ -286,15 +311,18 @@ if nav_selection == T["nav_home"]:
             head_col1, head_col2 = st.columns([8, 1])
             s_title = selected_shop['name_hi'] if is_hi else selected_shop['name']
             s_addr = selected_shop['address_hi'] if is_hi else selected_shop['address']
+            is_open = selected_shop.get("is_open", False)
 
             with head_col1:
-                st.subheader(f"💈 {s_title}")
+                status_str = "🟢 OPEN" if is_open else "🔴 CLOSED"
+                st.subheader(f"💈 {s_title} ({status_str})")
             with head_col2:
                 if st.button(f"✖️ {T['close']}", key="close_shop_details"):
                     st.session_state.selected_shop_id = None
                     st.rerun()
 
-            st.write(f"📍 **{T['distance']}:** {selected_shop['distance']} | {s_addr}")
+            calc_m, calc_lbl = calculate_haversine_distance(device_lat, device_lon, selected_shop["lat"], selected_shop["lon"])
+            st.write(f"📍 **{T['distance']}:** {calc_lbl} | {s_addr}")
 
             img_col1, img_col2 = st.columns(2)
             with img_col1:
@@ -306,58 +334,61 @@ if nav_selection == T["nav_home"]:
             est_wait = q_count * selected_shop["avg_time_per_cut"]
             has_booking_here = st.session_state.user_booking and st.session_state.user_booking["shop_id"] == selected_shop["id"]
 
-            if has_booking_here:
-                st.info(f"🔵 **{'आपकी टोकन संख्या' if is_hi else 'YOUR BOOKED SEAT'}:** {st.session_state.user_booking['token_label']}")
+            if not is_open:
+                st.error("🔒 **यह दुकान वर्तमान में बंद है।** (मालिक दुकान पर उपस्थित नहीं है या ऐप सक्रिय नहीं है)" if is_hi else "🔒 **This shop is currently CLOSED.** (Owner is not present at the shop or app is inactive)")
             else:
-                st.write(f"👥 **{T['curr_q']}:** `{q_count} {T['waiting']}` | ⏱️ **{T['est_wait']}:** `{est_wait} {T['mins']}`")
-                
-                if st.button(f"➕ {T['join_q']}", type="primary"):
-                    st.session_state[f"show_confirm_{selected_shop['id']}"] = True
+                if has_booking_here:
+                    st.info(f"🔵 **{'आपकी टोकन संख्या' if is_hi else 'YOUR BOOKED SEAT'}:** {st.session_state.user_booking['token_label']}")
+                else:
+                    st.write(f"👥 **{T['curr_q']}:** `{q_count} {T['waiting']}` | ⏱️ **{T['est_wait']}:** `{est_wait} {T['mins']}`")
+                    
+                    if st.button(f"➕ {T['join_q']}", type="primary"):
+                        st.session_state[f"show_confirm_{selected_shop['id']}"] = True
 
-                if st.session_state.get(f"show_confirm_{selected_shop['id']}", False):
-                    with st.form(f"confirm_booking_form_{selected_shop['id']}"):
-                        st.markdown(f"### 📋 {T['confirm_q']}")
-                        st.write(f"👤 **{T['name']}:** {st.session_state.user_profile['name']}")
-                        st.write(f"💈 **{T['shop']}:** {s_title}")
-                        
-                        add_group = st.checkbox(T['add_group'])
-                        num_people = 1
-                        if add_group:
-                            num_people = st.number_input(T['num_persons'], min_value=2, max_value=6, value=2, step=1)
-                        
-                        start_token = len(selected_shop["queue"]) + 20
-                        if num_people == 1:
-                            token_label = f"Token #{start_token}"
-                        else:
-                            end_token = start_token + num_people - 1
-                            token_label = f"Tokens #{start_token} to #{end_token}"
+                    if st.session_state.get(f"show_confirm_{selected_shop['id']}", False):
+                        with st.form(f"confirm_booking_form_{selected_shop['id']}"):
+                            st.markdown(f"### 📋 {T['confirm_q']}")
+                            st.write(f"👤 **{T['name']}:** {st.session_state.user_profile['name']}")
+                            st.write(f"💈 **{T['shop']}:** {s_title}")
                             
-                        st.write(f"🔢 **{T['assigned_token']}:** `{token_label}`")
-                        reach_time = st.number_input(T['travel_time_prompt'], min_value=5, max_value=60, value=None, placeholder="e.g. 15")
-
-                        if st.form_submit_button(T['confirm_btn']):
-                            if reach_time is None:
-                                st.error("कृपया यात्रा समय दर्ज करें।" if is_hi else "Please enter travel time.")
+                            add_group = st.checkbox(T['add_group'])
+                            num_people = 1
+                            if add_group:
+                                num_people = st.number_input(T['num_persons'], min_value=2, max_value=6, value=2, step=1)
+                            
+                            start_token = len(selected_shop["queue"]) + 20
+                            if num_people == 1:
+                                token_label = f"Token #{start_token}"
                             else:
-                                for i in range(num_people):
-                                    t_num = start_token + i
-                                    label = f"{st.session_state.user_profile['name']} (Person {i+1}) (Token #{t_num})" if num_people > 1 else f"{st.session_state.user_profile['name']} (Token #{t_num})"
-                                    selected_shop["queue"].append(label)
+                                end_token = start_token + num_people - 1
+                                token_label = f"Tokens #{start_token} to #{end_token}"
                                 
-                                st.session_state.user_booking = {
-                                    "shop_id": selected_shop["id"],
-                                    "shop_name": s_title,
-                                    "token_label": token_label,
-                                    "num_people": num_people,
-                                    "travel_time": reach_time,
-                                    "address": s_addr,
-                                    "distance": selected_shop["distance"],
-                                    "lat": selected_shop["lat"],
-                                    "lon": selected_shop["lon"]
-                                }
-                                st.session_state[f"show_confirm_{selected_shop['id']}"] = False
-                                st.success(f"सीट बुक हो गई: {token_label}" if is_hi else f"Seat Booked: {token_label}")
-                                st.rerun()
+                            st.write(f"🔢 **{T['assigned_token']}:** `{token_label}`")
+                            reach_time = st.number_input(T['travel_time_prompt'], min_value=5, max_value=60, value=None, placeholder="e.g. 15")
+
+                            if st.form_submit_button(T['confirm_btn']):
+                                if reach_time is None:
+                                    st.error("कृपया यात्रा समय दर्ज करें।" if is_hi else "Please enter travel time.")
+                                else:
+                                    for i in range(num_people):
+                                        t_num = start_token + i
+                                        label = f"{st.session_state.user_profile['name']} (Person {i+1}) (Token #{t_num})" if num_people > 1 else f"{st.session_state.user_profile['name']} (Token #{t_num})"
+                                        selected_shop["queue"].append(label)
+                                    
+                                    st.session_state.user_booking = {
+                                        "shop_id": selected_shop["id"],
+                                        "shop_name": s_title,
+                                        "token_label": token_label,
+                                        "num_people": num_people,
+                                        "travel_time": reach_time,
+                                        "address": s_addr,
+                                        "distance": calc_lbl,
+                                        "lat": selected_shop["lat"],
+                                        "lon": selected_shop["lon"]
+                                    }
+                                    st.session_state[f"show_confirm_{selected_shop['id']}"] = False
+                                    st.success(f"सीट बुक हो गई: {token_label}" if is_hi else f"Seat Booked: {token_label}")
+                                    st.rerun()
 
 # ==========================================
 # 2. ABOUT (PROFILE VIEW)
@@ -424,9 +455,9 @@ elif nav_selection == T["nav_appts"]:
         with col_b:
             st.subheader("🧭 " + ("नेविगेशन" if is_hi else "In-App Route Map"))
             route_map = folium.Map(location=[b['lat'], b['lon']], zoom_start=15, tiles="OpenStreetMap")
-            folium.Marker([23.1765, 75.7885], popup="You", icon=folium.Icon(color="blue", icon="user", prefix="fa")).add_to(route_map)
+            folium.Marker([device_lat, device_lon], popup="You", icon=folium.Icon(color="blue", icon="user", prefix="fa")).add_to(route_map)
             folium.Marker([b['lat'], b['lon']], popup=b['shop_name'], icon=folium.Icon(color="red", icon="cut", prefix="fa")).add_to(route_map)
-            folium.PolyLine([(23.1765, 75.7885), (b['lat'], b['lon'])], color="#1E88E5", weight=4, opacity=0.8).add_to(route_map)
+            folium.PolyLine([(device_lat, device_lon), (b['lat'], b['lon'])], color="#1E88E5", weight=4, opacity=0.8).add_to(route_map)
             st_folium(route_map, width=450, height=220)
 
         st.divider()
@@ -470,7 +501,7 @@ elif nav_selection == T["nav_owner"]:
                     st.error("Mobile number not registered! Standard registered demo mobile: 9876543210")
 
             if st.session_state.get("otp_sent_login", False):
-                st.warning(f"🔑 **DEMO TESTING OTP:** `{st.session_state.login_otp_code}` (Displayed on screen because real SMS gateway is inactive)")
+                st.warning(f"🔑 **DEMO TESTING OTP:** `{st.session_state.login_otp_code}`")
                 entered_otp = st.text_input("Enter Received 4-Digit OTP:", key="login_otp", type="password")
                 
                 col_log_v1, col_log_v2 = st.columns([1, 1])
@@ -490,12 +521,12 @@ elif nav_selection == T["nav_owner"]:
                         st.success("Login Successful!")
                         st.rerun()
 
-        # UNIFIED REGISTRATION FORM (SINGLE PAGE)
+        # SHOP REGISTRATION
         with tab_register:
             st.subheader("📝 Shop Owner Registration Form")
             st.caption("Please fill all details. Mobile verification is required before final submission.")
 
-            # --- FIELD 1: MOBILE NUMBER & INLINE OTP VERIFICATION ---
+            # --- MOBILE & OTP ---
             col_mob_input, col_mob_action = st.columns([2, 1])
 
             with col_mob_input:
@@ -530,9 +561,8 @@ elif nav_selection == T["nav_owner"]:
                         secs_left = int(60 - time_diff)
                         st.caption(f"⏳ Resend available in **{secs_left}s**")
 
-            # Inline OTP Display & Entry Section
             if st.session_state.otp_generated_code and not st.session_state.reg_mobile_verified:
-                st.warning(f"🔑 **DEMO MODE OTP CODE:** `{st.session_state.otp_generated_code}`\n\n*(Since live SMS API is not configured, your OTP code is displayed right here above)*")
+                st.warning(f"🔑 **DEMO MODE OTP CODE:** `{st.session_state.otp_generated_code}`")
                 
                 col_otp_in, col_otp_btn = st.columns([2, 1])
                 with col_otp_in:
@@ -550,15 +580,14 @@ elif nav_selection == T["nav_owner"]:
                         else:
                             st.error("Incorrect OTP code!")
 
-            # Verification Status Indicator
             if st.session_state.reg_mobile_verified:
                 st.success(f"✅ Verified Mobile: {st.session_state.reg_verified_mobile_num}")
             elif st.session_state.show_unverified_error:
-                st.markdown("<p style='color: #D32F2F; font-weight: bold; font-size: 14px;'>🚨 Please verify your mobile number with OTP before submitting the registration form!</p>", unsafe_allow_html=True)
+                st.markdown("<p style='color: #D32F2F; font-weight: bold; font-size: 14px;'>🚨 Please verify your mobile number with OTP before submitting!</p>", unsafe_allow_html=True)
 
             st.divider()
 
-            # --- REGISTRATION FIELDS ---
+            # REGISTRATION FORM FIELDS
             reg_owner_name = st.text_input("Owner Name*", value=st.session_state.user_profile["name"])
             reg_gender = st.selectbox("Gender*", ["Male", "Female", "Other"])
             reg_age = st.number_input("Age*", min_value=18, max_value=80, value=30)
@@ -580,7 +609,7 @@ elif nav_selection == T["nav_owner"]:
                 addr_state = st.text_input("State*", placeholder="e.g. Madhya Pradesh")
                 addr_country = st.text_input("Country*", value="India")
 
-            # --- PHOTO ATTACHMENTS (DEVICE GALLERY ONLY - NO CAMERA PERMISSIONS) ---
+            # PHOTO ATTACHMENTS
             st.divider()
             st.write("📸 **Add Shop Outside Photo***")
             uploaded_out = st.file_uploader("Choose Outside Photo from Device Gallery", type=["jpg", "png", "jpeg"], key="uploader_outside_gallery")
@@ -589,7 +618,7 @@ elif nav_selection == T["nav_owner"]:
 
             if st.session_state.reg_outside_photo_img is not None:
                 st.image(st.session_state.reg_outside_photo_img, caption="Preview: Shop Outside Photo", width=300)
-                if st.button("🔄 Change / Replace Outside Photo", key="reset_out_photo"):
+                if st.button("🔄 Change Outside Photo", key="reset_out_photo"):
                     st.session_state.reg_outside_photo_img = None
                     st.rerun()
 
@@ -600,61 +629,41 @@ elif nav_selection == T["nav_owner"]:
 
             if st.session_state.reg_inside_photo_img is not None:
                 st.image(st.session_state.reg_inside_photo_img, caption="Preview: Shop Inside Photo", width=300)
-                if st.button("🔄 Change / Replace Inside Photo", key="reset_in_photo"):
+                if st.button("🔄 Change Inside Photo", key="reset_in_photo"):
                     st.session_state.reg_inside_photo_img = None
                     st.rerun()
 
-            # --- DUAL MARKER INTERACTIVE MAP (RIGID LIVE RED DOT & DRAGGABLE BLUE PIN) ---
+            # MAP PINPOINT FOR SHOP LOCATION
             st.divider()
-            st.write("📍 **Pinpoint Exact Shop Location via Dual-Marker Map***")
-            st.caption(
-                "🔴 **Red Circle Dot:** Represents your live current device location.\n"
-                "🔵 **Blue Target Pin:** Drag or click anywhere on the map to pinpoint your shop location.\n"
-                "➖➖ **Dashed Line:** Shows distance between your current device location and shop location."
-            )
+            st.write("📍 **Pinpoint Exact Shop Location via Map***")
 
-            # Retrieve current real-time device location
-            loc_data = get_geolocation()
-            device_lat, device_lon = 23.1780, 75.7890
-            if loc_data and "coords" in loc_data:
-                device_lat = loc_data["coords"]["latitude"]
-                device_lon = loc_data["coords"]["longitude"]
-
-            # Initialize shop pin location to device location if not set
             if st.session_state.reg_shop_pin_lat is None or st.session_state.reg_shop_pin_lon is None:
                 st.session_state.reg_shop_pin_lat = device_lat
                 st.session_state.reg_shop_pin_lon = device_lon
 
-            # Render OpenStreetMap centered on current device position
             dual_map = folium.Map(
                 location=[st.session_state.reg_shop_pin_lat, st.session_state.reg_shop_pin_lon],
                 zoom_start=17,
                 tiles="OpenStreetMap"
             )
 
-            # 1. RIGID RED DOT (CURRENT LIVE DEVICE LOCATION)
             folium.CircleMarker(
                 location=[device_lat, device_lon],
-                radius=9,
-                popup="Live Device Current Location",
+                radius=8,
                 tooltip="🔴 Current Device Location",
                 color="#D32F2F",
                 fill=True,
                 fill_color="#FF5252",
-                fill_opacity=0.9,
-                weight=3
+                fill_opacity=0.9
             ).add_to(dual_map)
 
-            # 2. DRAGGABLE BLUE PIN (SHOP LOCATION TARGET)
             folium.Marker(
                 [st.session_state.reg_shop_pin_lat, st.session_state.reg_shop_pin_lon],
-                popup="Drag or Click screen to pinpoint shop location",
                 tooltip="🔵 Target Shop Location Pin",
                 draggable=True,
                 icon=folium.Icon(color="blue", icon="shopping-cart", prefix="fa")
             ).add_to(dual_map)
 
-            # 3. DASHED CONNECTING LINE (DISTANCE VISUALIZER)
             folium.PolyLine(
                 locations=[[device_lat, device_lon], [st.session_state.reg_shop_pin_lat, st.session_state.reg_shop_pin_lon]],
                 color="#1565C0",
@@ -665,7 +674,6 @@ elif nav_selection == T["nav_owner"]:
 
             map_event = st_folium(dual_map, width=750, height=360, key="interactive_dual_pinpoint_map")
 
-            # Capture clicks or marker drags to set Blue Shop Pin
             if map_event:
                 click_lat, click_lon = None, None
                 if map_event.get("last_clicked"):
@@ -688,7 +696,7 @@ elif nav_selection == T["nav_owner"]:
 
             col_pin1, col_pin2 = st.columns([2, 1])
             with col_pin1:
-                st.info(f"🔴 **Device Location:** `{device_lat:.5f}, {device_lon:.5f}`\n\n🔵 **Shop Location Pin:** `{st.session_state.reg_shop_pin_lat:.5f}, {st.session_state.reg_shop_pin_lon:.5f}`\n\n📏 **Distance Between:** **{dist_str}**")
+                st.info(f"🔴 **Current Device:** `{device_lat:.5f}, {device_lon:.5f}`\n\n🔵 **Shop Location Pin:** `{st.session_state.reg_shop_pin_lat:.5f}, {st.session_state.reg_shop_pin_lon:.5f}`\n\n📏 **Distance:** **{dist_str}**")
             with col_pin2:
                 st.write(" ")
                 if st.button("📌 Confirm Shop Pin Location", key="save_pin_btn"):
@@ -697,7 +705,6 @@ elif nav_selection == T["nav_owner"]:
 
             st.divider()
 
-            # FINAL SAVE & SUBMIT
             if st.button("Save & Register Shop", type="primary"):
                 full_address_str = f"{addr_street}, {addr_colony}, {addr_city}, {addr_district}, {addr_state}, {addr_country}".strip(", ")
                 
@@ -719,7 +726,6 @@ elif nav_selection == T["nav_owner"]:
 
                     verified_mob = st.session_state.reg_verified_mobile_num
 
-                    # Default image fallbacks for session persistence
                     outside_url = "https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=400"
                     inside_url = "https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=400"
 
@@ -739,13 +745,13 @@ elif nav_selection == T["nav_owner"]:
 
                     st.session_state.shops.append({
                         "id": new_shop_id,
+                        "owner_mobile": verified_mob,
                         "name": reg_shop_name,
                         "name_hi": reg_shop_name,
                         "lat": st.session_state.reg_shop_pin_lat,
                         "lon": st.session_state.reg_shop_pin_lon,
                         "address": full_address_str,
                         "address_hi": full_address_str,
-                        "distance": dist_str,
                         "outside_photo": outside_url,
                         "inside_photo": inside_url,
                         "avg_time_per_cut": 20,
@@ -768,7 +774,21 @@ elif nav_selection == T["nav_owner"]:
         owner_data = st.session_state.registered_owners.get(st.session_state.logged_owner_mobile)
         owner_shop = next(s for s in st.session_state.shops if s["id"] == owner_data["shop_id"])
 
+        # Calculate live distance from owner's active device to their registered shop
+        owner_dist_m, owner_dist_str = calculate_haversine_distance(
+            device_lat, device_lon, owner_shop["lat"], owner_shop["lon"]
+        )
+        is_shop_open = owner_shop.get("is_open", False)
+
         st.success(f"Logged in as Owner of **{owner_shop['name']}** ({owner_data['mobile']})")
+
+        # Automatic Open/Closed Status Banner
+        if is_shop_open:
+            st.markdown(f"### 🟢 Shop Status: **OPEN**\n*Device is **{int(owner_dist_m)} meters** from shop (Within 10m range)*")
+        else:
+            st.markdown(f"### 🔴 Shop Status: **CLOSED**\n*Owner device is **{owner_dist_str}** away from shop location (Requires <= 10 meters to activate Open status)*")
+
+        st.divider()
 
         col_chair, col_queue = st.columns([2, 1])
 
@@ -807,7 +827,6 @@ elif nav_selection == T["nav_owner"]:
 elif nav_selection == T["nav_settings"]:
     st.title("⚙️ " + ("सेटिंग्स" if is_hi else "App Settings"))
 
-    # Language Toggle
     st.subheader("🌐 Language / भाषा")
     lang_choice = st.radio("Select Language / भाषा चुनें:", ["English", "Hindi"], index=0 if st.session_state.app_language == "English" else 1)
     if lang_choice != st.session_state.app_language:
@@ -816,7 +835,6 @@ elif nav_selection == T["nav_settings"]:
 
     st.divider()
 
-    # Logout Option for Shop Owners
     st.subheader("🚪 " + ("लॉग आउट" if is_hi else "Account / Logout"))
     if st.session_state.owner_logged_in:
         st.write("आप दुकान मालिक के रूप में लॉग इन हैं।" if is_hi else "You are logged in as a Shop Owner.")
