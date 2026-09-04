@@ -2,10 +2,25 @@ import streamlit as st
 import folium
 from streamlit_folium import st_folium
 from streamlit_js_eval import get_geolocation
+from math import radians, cos, sin, asin, sqrt
 import time
 import random
 
 st.set_page_config(page_title="My Barber", page_icon="💈", layout="wide")
+
+# Helper function to calculate distance in meters/kilometers
+def calculate_haversine_distance(lat1, lon1, lat2, lon2):
+    if None in (lat1, lon1, lat2, lon2):
+        return 0, "0 m"
+    R = 6371000  # Earth radius in meters
+    dLat = radians(lat2 - lat1)
+    dLon = radians(lon2 - lon1)
+    a = sin(dLat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dLon / 2) ** 2
+    c = 2 * asin(sqrt(a))
+    dist_m = R * c
+    if dist_m >= 1000:
+        return dist_m, f"{dist_m / 1000:.2f} km"
+    return dist_m, f"{int(dist_m)} meters"
 
 # --- 1. INITIALIZE SESSION STATE ---
 if "app_language" not in st.session_state:
@@ -52,11 +67,11 @@ if "show_unverified_error" not in st.session_state:
     st.session_state.show_unverified_error = False
 
 # Location Pin State
-if "reg_pin_lat" not in st.session_state:
-    st.session_state.reg_pin_lat = None
+if "reg_shop_pin_lat" not in st.session_state:
+    st.session_state.reg_shop_pin_lat = None
 
-if "reg_pin_lon" not in st.session_state:
-    st.session_state.reg_pin_lon = None
+if "reg_shop_pin_lon" not in st.session_state:
+    st.session_state.reg_shop_pin_lon = None
 
 if "reg_location_saved" not in st.session_state:
     st.session_state.reg_location_saved = False
@@ -84,7 +99,7 @@ if "registered_owners" not in st.session_state:
             "shop_name": "Royal Cut Salon",
             "shop_name_hi": "रॉयल कट सलून",
             "payment": ["Offline Cash", "Online UPI/Card"],
-            "address": "Main Market, Clock Tower, Ujjain",
+            "address": "Main Market, Clock Tower, Ujjain, Madhya Pradesh, India",
             "lat": 23.1765,
             "lon": 75.7885,
             "shop_id": 1
@@ -99,8 +114,8 @@ if "shops" not in st.session_state:
             "name_hi": "रॉयल कट सलून",
             "lat": 23.1765,
             "lon": 75.7885,
-            "address": "Main Market, Clock Tower, Ujjain",
-            "address_hi": "मुख्य बाजार, क्लॉक टावर, उज्जैन",
+            "address": "Main Market, Clock Tower, Ujjain, MP, India",
+            "address_hi": "मुख्य बाजार, क्लॉक टावर, उज्जैन, म.प्र., भारत",
             "distance": "1.2 km",
             "outside_photo": "https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=400",
             "inside_photo": "https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=400",
@@ -113,8 +128,8 @@ if "shops" not in st.session_state:
             "name_hi": "क्लासिक बारबर हब",
             "lat": 23.1810,
             "lon": 75.7920,
-            "address": "Station Road, Opposite Bank, Ujjain",
-            "address_hi": "स्टेशन रोड, बैंक के सामने, उज्जैन",
+            "address": "Station Road, Opposite Bank, Ujjain, MP, India",
+            "address_hi": "स्टेशन रोड, बैंक के सामने, उज्जैन, म.प्र., भारत",
             "distance": "2.5 km",
             "outside_photo": "https://images.unsplash.com/photo-1622286342621-4bd786c2447c?w=400",
             "inside_photo": "https://images.unsplash.com/photo-1599351431202-1e0f0137899a?w=400",
@@ -442,7 +457,7 @@ elif nav_selection == T["nav_owner"]:
 
         # LOGIN TAB
         with tab_login:
-            st.subheader("🔑 Login with Mobile OTP")
+            st.subheader("🔑 Login with Mobile OTP (Demo Mode)")
             login_mobile = st.text_input("Mobile Number:", key="login_mob")
             
             if st.button("Send Login OTP"):
@@ -450,26 +465,35 @@ elif nav_selection == T["nav_owner"]:
                     generated_login_otp = str(random.randint(1000, 9999))
                     st.session_state.login_otp_code = generated_login_otp
                     st.session_state["otp_sent_login"] = True
-                    st.toast(f"📩 SMS Alert to {login_mobile}: Your Login OTP is {generated_login_otp}")
-                    st.info(f"OTP sent to {login_mobile}!")
+                    st.rerun()
                 else:
-                    st.error("Mobile number not registered!")
+                    st.error("Mobile number not registered! Standard registered demo mobile: 9876543210")
 
             if st.session_state.get("otp_sent_login", False):
+                st.warning(f"🔑 **DEMO TESTING OTP:** `{st.session_state.login_otp_code}` (Displayed on screen because real SMS gateway is inactive)")
                 entered_otp = st.text_input("Enter Received 4-Digit OTP:", key="login_otp", type="password")
-                if st.button("Verify & Login"):
-                    if entered_otp == st.session_state.login_otp_code:
+                
+                col_log_v1, col_log_v2 = st.columns([1, 1])
+                with col_log_v1:
+                    if st.button("Verify & Login"):
+                        if entered_otp == st.session_state.login_otp_code:
+                            st.session_state.owner_logged_in = True
+                            st.session_state.logged_owner_mobile = login_mobile
+                            st.success("Login Successful!")
+                            st.rerun()
+                        else:
+                            st.error("Invalid OTP code!")
+                with col_log_v2:
+                    if st.button("⚡ Auto-fill OTP & Login"):
                         st.session_state.owner_logged_in = True
                         st.session_state.logged_owner_mobile = login_mobile
                         st.success("Login Successful!")
                         st.rerun()
-                    else:
-                        st.error("Invalid OTP code!")
 
         # UNIFIED REGISTRATION FORM (SINGLE PAGE)
         with tab_register:
             st.subheader("📝 Shop Owner Registration Form")
-            st.caption("Please fill all details. Mobile verification is mandatory before final submission.")
+            st.caption("Please fill all details. Mobile verification is required before final submission.")
 
             # --- FIELD 1: MOBILE NUMBER & INLINE OTP VERIFICATION ---
             col_mob_input, col_mob_action = st.columns([2, 1])
@@ -499,19 +523,20 @@ elif nav_selection == T["nav_owner"]:
                                     new_rand_otp = str(random.randint(1000, 9999))
                                     st.session_state.otp_sent_time = time.time()
                                     st.session_state.otp_generated_code = new_rand_otp
-                                    st.toast(f"📩 SMS Alert to {reg_mobile_num.strip()}: Your OTP is {new_rand_otp}")
-                                    st.info(f"OTP sent to {reg_mobile_num.strip()}!")
+                                    st.rerun()
                             else:
                                 st.error("Enter valid 10-digit number.")
                     else:
                         secs_left = int(60 - time_diff)
                         st.caption(f"⏳ Resend available in **{secs_left}s**")
 
-            # Inline OTP Input & Verify Section
+            # Inline OTP Display & Entry Section
             if st.session_state.otp_generated_code and not st.session_state.reg_mobile_verified:
+                st.warning(f"🔑 **DEMO MODE OTP CODE:** `{st.session_state.otp_generated_code}`\n\n*(Since live SMS API is not configured, your OTP code is displayed right here above)*")
+                
                 col_otp_in, col_otp_btn = st.columns([2, 1])
                 with col_otp_in:
-                    user_otp_input = st.text_input("Enter Received 4-Digit OTP", type="password", key="inline_otp_key")
+                    user_otp_input = st.text_input("Enter the 4-Digit OTP Code", type="password", key="inline_otp_key")
                 with col_otp_btn:
                     st.write(" ")
                     st.write(" ")
@@ -544,9 +569,19 @@ elif nav_selection == T["nav_owner"]:
             p_off = st.checkbox("Offline Cash", value=True)
             p_on = st.checkbox("Online UPI/Card", value=True)
 
-            reg_shop_address = st.text_area("Shop Address (दुकान का पूरा पता)*")
+            st.write("📍 **Detailed Shop Address Structure (दुकान का पता)**")
+            addr_col1, addr_col2 = st.columns(2)
+            with addr_col1:
+                addr_street = st.text_input("Street / Related Address*", placeholder="e.g. Shop No. 4, Clock Tower Road")
+                addr_colony = st.text_input("Colony / Village*", placeholder="e.g. Main Market / Rampur")
+                addr_city = st.text_input("City / Town*", placeholder="e.g. Ujjain")
+            with addr_col2:
+                addr_district = st.text_input("District*", placeholder="e.g. Ujjain District")
+                addr_state = st.text_input("State*", placeholder="e.g. Madhya Pradesh")
+                addr_country = st.text_input("Country*", value="India")
 
             # --- PHOTO ATTACHMENTS (DEVICE GALLERY ONLY - NO CAMERA PERMISSIONS) ---
+            st.divider()
             st.write("📸 **Add Shop Outside Photo***")
             uploaded_out = st.file_uploader("Choose Outside Photo from Device Gallery", type=["jpg", "png", "jpeg"], key="uploader_outside_gallery")
             if uploaded_out is not None:
@@ -569,40 +604,68 @@ elif nav_selection == T["nav_owner"]:
                     st.session_state.reg_inside_photo_img = None
                     st.rerun()
 
-            # --- DYNAMIC INTERACTIVE MAP PINPOINT SELECTION ---
+            # --- DUAL MARKER INTERACTIVE MAP (RIGID LIVE RED DOT & DRAGGABLE BLUE PIN) ---
             st.divider()
-            st.write("📍 **Locate Shop via Map (Pinpoint Target)***")
-            st.caption("1. The map automatically detects your device location.\n2. Click or drag on any road, landmark, or chauraha to place your exact shop pinpoint.")
+            st.write("📍 **Pinpoint Exact Shop Location via Dual-Marker Map***")
+            st.caption(
+                "🔴 **Red Circle Dot:** Represents your live current device location.\n"
+                "🔵 **Blue Target Pin:** Drag or click anywhere on the map to pinpoint your shop location.\n"
+                "➖➖ **Dashed Line:** Shows distance between your current device location and shop location."
+            )
 
-            # Auto-detect current device GPS location if pin not set yet
+            # Retrieve current real-time device location
             loc_data = get_geolocation()
-            if st.session_state.reg_pin_lat is None or st.session_state.reg_pin_lon is None:
-                if loc_data and "coords" in loc_data:
-                    st.session_state.reg_pin_lat = loc_data["coords"]["latitude"]
-                    st.session_state.reg_pin_lon = loc_data["coords"]["longitude"]
-                else:
-                    st.session_state.reg_pin_lat = 23.1780
-                    st.session_state.reg_pin_lon = 75.7890
+            device_lat, device_lon = 23.1780, 75.7890
+            if loc_data and "coords" in loc_data:
+                device_lat = loc_data["coords"]["latitude"]
+                device_lon = loc_data["coords"]["longitude"]
 
-            # Render OpenStreetMap with high-definition road & landmark names
-            pin_map = folium.Map(
-                location=[st.session_state.reg_pin_lat, st.session_state.reg_pin_lon],
+            # Initialize shop pin location to device location if not set
+            if st.session_state.reg_shop_pin_lat is None or st.session_state.reg_shop_pin_lon is None:
+                st.session_state.reg_shop_pin_lat = device_lat
+                st.session_state.reg_shop_pin_lon = device_lon
+
+            # Render OpenStreetMap centered on current device position
+            dual_map = folium.Map(
+                location=[st.session_state.reg_shop_pin_lat, st.session_state.reg_shop_pin_lon],
                 zoom_start=17,
                 tiles="OpenStreetMap"
             )
 
-            # Draggable Marker so owner can move it seamlessly
+            # 1. RIGID RED DOT (CURRENT LIVE DEVICE LOCATION)
+            folium.CircleMarker(
+                location=[device_lat, device_lon],
+                radius=9,
+                popup="Live Device Current Location",
+                tooltip="🔴 Current Device Location",
+                color="#D32F2F",
+                fill=True,
+                fill_color="#FF5252",
+                fill_opacity=0.9,
+                weight=3
+            ).add_to(dual_map)
+
+            # 2. DRAGGABLE BLUE PIN (SHOP LOCATION TARGET)
             folium.Marker(
-                [st.session_state.reg_pin_lat, st.session_state.reg_pin_lon],
-                popup="Drag or Click to relocate target shop position",
-                tooltip="Selected Shop Target Pin",
+                [st.session_state.reg_shop_pin_lat, st.session_state.reg_shop_pin_lon],
+                popup="Drag or Click screen to pinpoint shop location",
+                tooltip="🔵 Target Shop Location Pin",
                 draggable=True,
-                icon=folium.Icon(color="red", icon="cut", prefix="fa")
-            ).add_to(pin_map)
+                icon=folium.Icon(color="blue", icon="shopping-cart", prefix="fa")
+            ).add_to(dual_map)
 
-            map_event = st_folium(pin_map, width=700, height=340, key="interactive_shop_pinpoint_map")
+            # 3. DASHED CONNECTING LINE (DISTANCE VISUALIZER)
+            folium.PolyLine(
+                locations=[[device_lat, device_lon], [st.session_state.reg_shop_pin_lat, st.session_state.reg_shop_pin_lon]],
+                color="#1565C0",
+                weight=3,
+                opacity=0.8,
+                dash_array="8, 8"
+            ).add_to(dual_map)
 
-            # Capture click or dragged marker movements dynamically
+            map_event = st_folium(dual_map, width=750, height=360, key="interactive_dual_pinpoint_map")
+
+            # Capture clicks or marker drags to set Blue Shop Pin
             if map_event:
                 click_lat, click_lon = None, None
                 if map_event.get("last_clicked"):
@@ -613,34 +676,41 @@ elif nav_selection == T["nav_owner"]:
                     click_lon = map_event["last_marker_dragged"]["lng"]
 
                 if click_lat is not None and click_lon is not None:
-                    if abs(click_lat - st.session_state.reg_pin_lat) > 0.0001 or abs(click_lon - st.session_state.reg_pin_lon) > 0.0001:
-                        st.session_state.reg_pin_lat = click_lat
-                        st.session_state.reg_pin_lon = click_lon
+                    if abs(click_lat - st.session_state.reg_shop_pin_lat) > 0.00005 or abs(click_lon - st.session_state.reg_shop_pin_lon) > 0.00005:
+                        st.session_state.reg_shop_pin_lat = click_lat
+                        st.session_state.reg_shop_pin_lon = click_lon
                         st.session_state.reg_location_saved = True
                         st.rerun()
 
+            dist_val, dist_str = calculate_haversine_distance(
+                device_lat, device_lon, st.session_state.reg_shop_pin_lat, st.session_state.reg_shop_pin_lon
+            )
+
             col_pin1, col_pin2 = st.columns([2, 1])
             with col_pin1:
-                st.write(f"Selected Pinpoint Coordinates: `{st.session_state.reg_pin_lat:.5f}, {st.session_state.reg_pin_lon:.5f}`")
+                st.info(f"🔴 **Device Location:** `{device_lat:.5f}, {device_lon:.5f}`\n\n🔵 **Shop Location Pin:** `{st.session_state.reg_shop_pin_lat:.5f}, {st.session_state.reg_shop_pin_lon:.5f}`\n\n📏 **Distance Between:** **{dist_str}**")
             with col_pin2:
-                if st.button("📌 Confirm Pin Location", key="save_pin_btn"):
+                st.write(" ")
+                if st.button("📌 Confirm Shop Pin Location", key="save_pin_btn"):
                     st.session_state.reg_location_saved = True
-                    st.success("Location Pinpoint Saved!")
+                    st.success("Shop Location Pin Saved!")
 
             st.divider()
 
             # FINAL SAVE & SUBMIT
             if st.button("Save & Register Shop", type="primary"):
+                full_address_str = f"{addr_street}, {addr_colony}, {addr_city}, {addr_district}, {addr_state}, {addr_country}".strip(", ")
+                
                 if not st.session_state.reg_mobile_verified:
                     st.session_state.show_unverified_error = True
                     st.error("Submission Failed: Mobile number is not verified.")
                     st.rerun()
-                elif not reg_shop_name.strip() or not reg_shop_address.strip() or not reg_owner_name.strip():
-                    st.error("Please fill all required text fields marked with *")
+                elif not reg_shop_name.strip() or not reg_owner_name.strip() or not addr_street.strip() or not addr_city.strip() or not addr_state.strip():
+                    st.error("Please fill all required text and address fields marked with *")
                 elif st.session_state.reg_outside_photo_img is None or st.session_state.reg_inside_photo_img is None:
                     st.error("Please select both Shop Outside and Shop Inside photos from your device gallery.")
                 elif not st.session_state.reg_location_saved:
-                    st.error("Please click 'Confirm Pin Location' on the map before submitting.")
+                    st.error("Please click 'Confirm Shop Pin Location' on the map before submitting.")
                 else:
                     new_shop_id = len(st.session_state.shops) + 1
                     pay_methods = []
@@ -661,9 +731,9 @@ elif nav_selection == T["nav_owner"]:
                         "shop_name": reg_shop_name,
                         "shop_name_hi": reg_shop_name,
                         "payment": pay_methods,
-                        "address": reg_shop_address,
-                        "lat": st.session_state.reg_pin_lat,
-                        "lon": st.session_state.reg_pin_lon,
+                        "address": full_address_str,
+                        "lat": st.session_state.reg_shop_pin_lat,
+                        "lon": st.session_state.reg_shop_pin_lon,
                         "shop_id": new_shop_id
                     }
 
@@ -671,11 +741,11 @@ elif nav_selection == T["nav_owner"]:
                         "id": new_shop_id,
                         "name": reg_shop_name,
                         "name_hi": reg_shop_name,
-                        "lat": st.session_state.reg_pin_lat,
-                        "lon": st.session_state.reg_pin_lon,
-                        "address": reg_shop_address,
-                        "address_hi": reg_shop_address,
-                        "distance": "0.8 km",
+                        "lat": st.session_state.reg_shop_pin_lat,
+                        "lon": st.session_state.reg_shop_pin_lon,
+                        "address": full_address_str,
+                        "address_hi": full_address_str,
+                        "distance": dist_str,
                         "outside_photo": outside_url,
                         "inside_photo": inside_url,
                         "avg_time_per_cut": 20,
