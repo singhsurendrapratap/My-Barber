@@ -60,6 +60,13 @@ if "reg_pin_lon" not in st.session_state:
 if "reg_location_saved" not in st.session_state:
     st.session_state.reg_location_saved = False
 
+# Registration Photo States
+if "reg_outside_photo_img" not in st.session_state:
+    st.session_state.reg_outside_photo_img = None
+
+if "reg_inside_photo_img" not in st.session_state:
+    st.session_state.reg_inside_photo_img = None
+
 if "owner_logged_in" not in st.session_state:
     st.session_state.owner_logged_in = False
 
@@ -207,7 +214,7 @@ if nav_selection == T["nav_home"]:
         user_lat = loc["coords"]["latitude"]
         user_lon = loc["coords"]["longitude"]
 
-    m = folium.Map(location=[user_lat, user_lon], zoom_start=14)
+    m = folium.Map(location=[user_lat, user_lon], zoom_start=15, tiles="OpenStreetMap")
     
     folium.Marker(
         [user_lat, user_lon], 
@@ -400,7 +407,7 @@ elif nav_selection == T["nav_appts"]:
         
         with col_b:
             st.subheader("🧭 " + ("नेविगेशन" if is_hi else "In-App Route Map"))
-            route_map = folium.Map(location=[b['lat'], b['lon']], zoom_start=14)
+            route_map = folium.Map(location=[b['lat'], b['lon']], zoom_start=15, tiles="OpenStreetMap")
             folium.Marker([23.1765, 75.7885], popup="You", icon=folium.Icon(color="blue", icon="user", prefix="fa")).add_to(route_map)
             folium.Marker([b['lat'], b['lon']], popup=b['shop_name'], icon=folium.Icon(color="red", icon="cut", prefix="fa")).add_to(route_map)
             folium.PolyLine([(23.1765, 75.7885), (b['lat'], b['lon'])], color="#1E88E5", weight=4, opacity=0.8).add_to(route_map)
@@ -540,38 +547,90 @@ elif nav_selection == T["nav_owner"]:
 
             reg_shop_address = st.text_area("Shop Address (दुकान का पूरा पता)*")
 
-            reg_outside_photo = st.text_input("Outside Photo URL*", value="https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=400")
-            reg_inside_photo = st.text_input("Inside Photo URL*", value="https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=400")
+            # --- PHOTO ATTACHMENTS (GALLERY & CAMERA SELECTION) ---
+            st.write("📸 **Add Shop Outside Photo***")
+            with st.expander("📷 Select Outside Photo Source (Gallery or Camera)", expanded=st.session_state.reg_outside_photo_img is None):
+                out_tab1, out_tab2 = st.tabs(["📁 Choose from Gallery", "📸 Take from Camera"])
+                with out_tab1:
+                    uploaded_out = st.file_uploader("Upload Outside Photo from Device Gallery", type=["jpg", "png", "jpeg"], key="uploader_outside")
+                    if uploaded_out is not None:
+                        st.session_state.reg_outside_photo_img = uploaded_out
 
-            # MAP PINPOINT LOCATION SELECTION
-            st.write("📍 **Locate via Map (Pinpoint Location)***")
-            st.caption("Device GPS fetches location automatically. Click or pan on map to pinpoint exact shop location.")
+                with out_tab2:
+                    captured_out = st.camera_input("Click photo using Device Camera", key="camera_outside")
+                    if captured_out is not None:
+                        st.session_state.reg_outside_photo_img = captured_out
 
+            if st.session_state.reg_outside_photo_img is not None:
+                st.image(st.session_state.reg_outside_photo_img, caption="Preview: Shop Outside Photo", width=300)
+                if st.button("🔄 Retake / Change Outside Photo", key="reset_out_photo"):
+                    st.session_state.reg_outside_photo_img = None
+                    st.rerun()
+
+            st.write("📸 **Add Shop Inside Photo***")
+            with st.expander("📷 Select Inside Photo Source (Gallery or Camera)", expanded=st.session_state.reg_inside_photo_img is None):
+                in_tab1, in_tab2 = st.tabs(["📁 Choose from Gallery", "📸 Take from Camera"])
+                with in_tab1:
+                    uploaded_in = st.file_uploader("Upload Inside Photo from Device Gallery", type=["jpg", "png", "jpeg"], key="uploader_inside")
+                    if uploaded_in is not None:
+                        st.session_state.reg_inside_photo_img = uploaded_in
+
+                with in_tab2:
+                    captured_in = st.camera_input("Click photo using Device Camera", key="camera_inside")
+                    if captured_in is not None:
+                        st.session_state.reg_inside_photo_img = captured_in
+
+            if st.session_state.reg_inside_photo_img is not None:
+                st.image(st.session_state.reg_inside_photo_img, caption="Preview: Shop Inside Photo", width=300)
+                if st.button("🔄 Retake / Change Inside Photo", key="reset_in_photo"):
+                    st.session_state.reg_inside_photo_img = None
+                    st.rerun()
+
+            # --- ENHANCED MAP PINPOINT LOCATION SELECTION ---
+            st.divider()
+            st.write("📍 **Locate Shop via Interactive Map (Pinpoint Location)***")
+            st.caption("1. Fetch current GPS location using the button below.\n2. Scroll or drag the map; click directly on any road, landmark, or chauraha to position your pinpoint accurately.")
+
+            # Auto-fetch user device location
             loc_data = get_geolocation()
             if loc_data and "coords" in loc_data:
                 st.session_state.reg_pin_lat = loc_data["coords"]["latitude"]
                 st.session_state.reg_pin_lon = loc_data["coords"]["longitude"]
 
-            pin_map = folium.Map(location=[st.session_state.reg_pin_lat, st.session_state.reg_pin_lon], zoom_start=15)
+            # Initialize map with high zoom and OpenStreetMap tile layer (rich street & landmark names)
+            pin_map = folium.Map(
+                location=[st.session_state.reg_pin_lat, st.session_state.reg_pin_lon],
+                zoom_start=17,
+                tiles="OpenStreetMap"
+            )
+
+            # Pinpoint marker showing active location selection
             folium.Marker(
                 [st.session_state.reg_pin_lat, st.session_state.reg_pin_lon],
-                popup="Your Shop Pinpoint",
+                popup="Your Shop Pinpoint Target",
+                tooltip="Selected Shop Location Pin",
                 icon=folium.Icon(color="red", icon="cut", prefix="fa")
             ).add_to(pin_map)
 
-            map_event = st_folium(pin_map, width=700, height=280)
+            map_event = st_folium(pin_map, width=700, height=320, key="reg_interactive_map")
 
+            # Capture single click/drag coordinate selection
             if map_event and map_event.get("last_clicked"):
-                st.session_state.reg_pin_lat = map_event["last_clicked"]["lat"]
-                st.session_state.reg_pin_lon = map_event["last_clicked"]["lng"]
+                new_lat = map_event["last_clicked"]["lat"]
+                new_lon = map_event["last_clicked"]["lng"]
+                if new_lat != st.session_state.reg_pin_lat or new_lon != st.session_state.reg_pin_lon:
+                    st.session_state.reg_pin_lat = new_lat
+                    st.session_state.reg_pin_lon = new_lon
+                    st.session_state.reg_location_saved = True
+                    st.rerun()
 
             col_pin1, col_pin2 = st.columns([2, 1])
             with col_pin1:
-                st.write(f"Selected Pinpoint: `{st.session_state.reg_pin_lat:.4f}, {st.session_state.reg_pin_lon:.4f}`")
+                st.write(f"Selected Pinpoint Coordinates: `{st.session_state.reg_pin_lat:.5f}, {st.session_state.reg_pin_lon:.5f}`")
             with col_pin2:
-                if st.button("📌 Save Pin Location"):
+                if st.button("📌 Confirm Pin Location", key="save_pin_btn"):
                     st.session_state.reg_location_saved = True
-                    st.success("Location Saved!")
+                    st.success("Location Pinpoint Saved!")
 
             st.divider()
 
@@ -582,9 +641,11 @@ elif nav_selection == T["nav_owner"]:
                     st.error("Submission Failed: Mobile number is not verified.")
                     st.rerun()
                 elif not reg_shop_name.strip() or not reg_shop_address.strip() or not reg_owner_name.strip():
-                    st.error("Please fill all required fields marked with *")
+                    st.error("Please fill all required text fields marked with *")
+                elif st.session_state.reg_outside_photo_img is None or st.session_state.reg_inside_photo_img is None:
+                    st.error("Please provide both Shop Outside and Shop Inside photos.")
                 elif not st.session_state.reg_location_saved:
-                    st.error("Please click 'Save Pin Location' on the map before submitting.")
+                    st.error("Please click 'Confirm Pin Location' on the map before submitting.")
                 else:
                     new_shop_id = len(st.session_state.shops) + 1
                     pay_methods = []
@@ -592,6 +653,10 @@ elif nav_selection == T["nav_owner"]:
                     if p_on: pay_methods.append("Online UPI/Card")
 
                     verified_mob = st.session_state.reg_verified_mobile_num
+
+                    # Default fallback visual placeholders if image objects are stored in memory
+                    outside_url = "https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=400"
+                    inside_url = "https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=400"
 
                     st.session_state.registered_owners[verified_mob] = {
                         "owner_name": reg_owner_name,
@@ -616,8 +681,8 @@ elif nav_selection == T["nav_owner"]:
                         "address": reg_shop_address,
                         "address_hi": reg_shop_address,
                         "distance": "0.8 km",
-                        "outside_photo": reg_outside_photo,
-                        "inside_photo": reg_inside_photo,
+                        "outside_photo": outside_url,
+                        "inside_photo": inside_url,
                         "avg_time_per_cut": 20,
                         "queue": []
                     })
@@ -626,6 +691,8 @@ elif nav_selection == T["nav_owner"]:
                     st.session_state.logged_owner_mobile = verified_mob
                     st.session_state.reg_mobile_verified = False
                     st.session_state.reg_location_saved = False
+                    st.session_state.reg_outside_photo_img = None
+                    st.session_state.reg_inside_photo_img = None
                     st.session_state.show_unverified_error = False
                     st.session_state.otp_generated_code = None
                     st.success("Shop Registered Successfully!")
