@@ -3,6 +3,7 @@ import folium
 from streamlit_folium import st_folium
 from streamlit_js_eval import get_geolocation
 import time
+import random
 
 st.set_page_config(page_title="My Barber", page_icon="💈", layout="wide")
 
@@ -31,7 +32,7 @@ if "user_booking" not in st.session_state:
 if "selected_shop_id" not in st.session_state:
     st.session_state.selected_shop_id = None
 
-# Registration OTP & Map Location States
+# Registration State Variables
 if "reg_mobile_verified" not in st.session_state:
     st.session_state.reg_mobile_verified = False
 
@@ -40,6 +41,15 @@ if "reg_verified_mobile_num" not in st.session_state:
 
 if "otp_sent_time" not in st.session_state:
     st.session_state.otp_sent_time = 0
+
+if "otp_generated_code" not in st.session_state:
+    st.session_state.otp_generated_code = None
+
+if "login_otp_code" not in st.session_state:
+    st.session_state.login_otp_code = None
+
+if "show_unverified_error" not in st.session_state:
+    st.session_state.show_unverified_error = False
 
 if "reg_pin_lat" not in st.session_state:
     st.session_state.reg_pin_lat = 23.1780
@@ -65,7 +75,7 @@ if "registered_owners" not in st.session_state:
             "mobile": "9876543210",
             "shop_name": "Royal Cut Salon",
             "shop_name_hi": "रॉयल कट सलून",
-            "payment": ["Offline", "Online"],
+            "payment": ["Offline Cash", "Online UPI/Card"],
             "address": "Main Market, Clock Tower, Ujjain",
             "lat": 23.1765,
             "lon": 75.7885,
@@ -420,7 +430,7 @@ elif nav_selection == T["nav_owner"]:
     st.title("✂️ " + ("दुकान मालिक पोर्टल" if is_hi else "Barber Owner Portal"))
 
     if not st.session_state.owner_logged_in:
-        tab_login, tab_register = st.tabs(["🔐 " + ("लॉग इन" if is_hi else "Login"), "📝 " + ("नया पंजीकरण" if is_hi else "Register New Shop")])
+        tab_login, tab_register = st.tabs(["🔐 " + ("लॉग इन" if is_hi else "Login"), "📝 " + ("नया पंजीकरण" if is_hi else "Shop Registration")])
 
         # LOGIN TAB
         with tab_login:
@@ -429,166 +439,197 @@ elif nav_selection == T["nav_owner"]:
             
             if st.button("Send Login OTP"):
                 if login_mobile in st.session_state.registered_owners:
+                    # Generate Random 4-Digit OTP
+                    generated_login_otp = str(random.randint(1000, 9999))
+                    st.session_state.login_otp_code = generated_login_otp
                     st.session_state["otp_sent_login"] = True
-                    st.success("OTP sent to mobile: 1234 (Demo)")
+                    st.toast(f"📩 SMS Alert to {login_mobile}: Your Login OTP is {generated_login_otp}")
+                    st.info(f"OTP sent to {login_mobile}!")
                 else:
                     st.error("Mobile number not registered!")
 
             if st.session_state.get("otp_sent_login", False):
-                entered_otp = st.text_input("Enter 4-Digit OTP:", key="login_otp", type="password")
+                entered_otp = st.text_input("Enter Received 4-Digit OTP:", key="login_otp", type="password")
                 if st.button("Verify & Login"):
-                    if entered_otp == "1234":
+                    if entered_otp == st.session_state.login_otp_code:
                         st.session_state.owner_logged_in = True
                         st.session_state.logged_owner_mobile = login_mobile
                         st.success("Login Successful!")
                         st.rerun()
                     else:
-                        st.error("Invalid OTP!")
+                        st.error("Invalid OTP code!")
 
-        # REGISTER TAB (STEP-BY-STEP OTP + INTERACTIVE MAP PIN)
+        # UNIFIED REGISTRATION FORM (CHRONOLOGICAL, SINGLE PAGE)
         with tab_register:
-            st.subheader("📝 Register New Shop")
-            st.caption("1 Mobile Number = 1 Shop Rule")
+            st.subheader("📝 Shop Owner Registration Form")
+            st.caption("Please fill all details. Mobile verification is mandatory before final submission.")
 
-            # --- STEP 1: MOBILE OTP VERIFICATION ---
-            st.markdown("#### Step 1: Mobile Verification")
-            col_mob1, col_mob2 = st.columns([3, 1])
-            with col_mob1:
-                reg_mobile_input = st.text_input("Mobile Number*", value=st.session_state.reg_verified_mobile_num, disabled=st.session_state.reg_mobile_verified)
-            with col_mob2:
+            # --- FIELD 1: MOBILE NUMBER & INLINE OTP VERIFICATION ---
+            col_mob_input, col_mob_action = st.columns([2, 1])
+
+            with col_mob_input:
+                reg_mobile_num = st.text_input(
+                    "Mobile Number (OTP Verification Required)*",
+                    value=st.session_state.reg_verified_mobile_num,
+                    disabled=st.session_state.reg_mobile_verified,
+                    placeholder="Enter 10-digit mobile number"
+                )
+
+            with col_mob_action:
                 st.write(" ")
                 st.write(" ")
-                current_time = time.time()
-                time_since_otp = current_time - st.session_state.otp_sent_time
+                time_now = time.time()
+                time_diff = time_now - st.session_state.otp_sent_time
 
                 if not st.session_state.reg_mobile_verified:
-                    if time_since_otp > 120 or st.session_state.otp_sent_time == 0:
-                        if st.button("Send OTP"):
-                            if len(reg_mobile_input.strip()) >= 10:
-                                if reg_mobile_input.strip() in st.session_state.registered_owners:
-                                    st.error("Mobile already registered!")
+                    if time_diff > 60 or st.session_state.otp_sent_time == 0:
+                        btn_label = "Send OTP" if st.session_state.otp_sent_time == 0 else "Resend OTP"
+                        if st.button(btn_label, key="send_otp_btn"):
+                            if len(reg_mobile_num.strip()) >= 10:
+                                if reg_mobile_num.strip() in st.session_state.registered_owners:
+                                    st.error("Mobile number already registered!")
                                 else:
+                                    # Generate Random 4-Digit OTP
+                                    new_rand_otp = str(random.randint(1000, 9999))
                                     st.session_state.otp_sent_time = time.time()
-                                    st.session_state["otp_sent_reg"] = True
-                                    st.success("OTP sent: 1234")
+                                    st.session_state.otp_generated_code = new_rand_otp
+                                    st.toast(f"📩 SMS Alert to {reg_mobile_num.strip()}: Your OTP is {new_rand_otp}")
+                                    st.info(f"OTP sent to {reg_mobile_num.strip()}!")
                             else:
                                 st.error("Enter valid 10-digit number.")
                     else:
-                        remaining_seconds = int(120 - time_since_otp)
-                        st.info(f"Resend in {remaining_seconds}s")
+                        secs_left = int(60 - time_diff)
+                        st.caption(f"⏳ Resend available in **{secs_left}s**")
 
-            if st.session_state.get("otp_sent_reg", False) and not st.session_state.reg_mobile_verified:
-                reg_otp_entered = st.text_input("Enter Received OTP (1234):", type="password", key="reg_otp_input")
-                if st.button("Verify OTP"):
-                    if reg_otp_entered == "1234":
-                        st.session_state.reg_mobile_verified = True
-                        st.session_state.reg_verified_mobile_num = reg_mobile_input.strip()
-                        st.success("Mobile Verified Successfully! ✅")
-                        st.rerun()
-                    else:
-                        st.error("Incorrect OTP!")
+            # Inline OTP Input & Verify Section
+            if st.session_state.otp_generated_code and not st.session_state.reg_mobile_verified:
+                col_otp_in, col_otp_btn = st.columns([2, 1])
+                with col_otp_in:
+                    user_otp_input = st.text_input("Enter Received 4-Digit OTP", type="password", key="inline_otp_key")
+                with col_otp_btn:
+                    st.write(" ")
+                    st.write(" ")
+                    if st.button("Verify OTP", key="verify_otp_btn"):
+                        if user_otp_input == st.session_state.otp_generated_code:
+                            st.session_state.reg_mobile_verified = True
+                            st.session_state.reg_verified_mobile_num = reg_mobile_num.strip()
+                            st.session_state.show_unverified_error = False
+                            st.success("Mobile Verified Successfully! ✅")
+                            st.rerun()
+                        else:
+                            st.error("Incorrect OTP code!")
 
+            # Verification Status Indicator
             if st.session_state.reg_mobile_verified:
-                st.success(f"Verified Mobile: {st.session_state.reg_verified_mobile_num} ✅")
+                st.success(f"✅ Verified Mobile: {st.session_state.reg_verified_mobile_num}")
+            elif st.session_state.show_unverified_error:
+                st.markdown("<p style='color: #D32F2F; font-weight: bold; font-size: 14px;'>🚨 Please verify your mobile number with OTP before submitting the registration form!</p>", unsafe_allow_html=True)
 
             st.divider()
 
-            # --- STEP 2: REGISTRATION FORM ---
-            st.markdown("#### Step 2: Shop Details & Location Pinpoint")
+            # --- REMAINING CHRONOLOGICAL REGISTRATION FIELDS ---
+            reg_owner_name = st.text_input("Owner Name*", value=st.session_state.user_profile["name"])
+            reg_gender = st.selectbox("Gender*", ["Male", "Female", "Other"])
+            reg_age = st.number_input("Age*", min_value=18, max_value=80, value=30)
+            
+            reg_shop_name = st.text_input("Shop Name (दुकान का नाम)*")
+            
+            st.write("Payment Options Accepted (भुगतान के तरीके)*:")
+            p_off = st.checkbox("Offline Cash", value=True)
+            p_on = st.checkbox("Online UPI/Card", value=True)
 
-            if not st.session_state.reg_mobile_verified:
-                st.warning("⚠️ Please complete Step 1 Mobile Verification above to unlock registration form.")
-            else:
-                o_name = st.text_input("Owner Name*", value=st.session_state.user_profile["name"])
-                o_gender = st.selectbox("Gender*", ["Male", "Female", "Other"])
-                o_age = st.number_input("Age*", min_value=18, max_value=80, value=30)
-                s_name = st.text_input("Shop Name*")
-                
-                st.write("Payment Options Accepted*:")
-                p_offline = st.checkbox("Offline Cash", value=True)
-                p_online = st.checkbox("Online UPI/Card", value=True)
-                
-                s_address = st.text_area("Shop Address*")
-                s_outside = st.text_input("Outside Photo URL*", value="https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=400")
-                s_inside = st.text_input("Inside Photo URL*", value="https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=400")
+            reg_shop_address = st.text_area("Shop Address (दुकान का पूरा पता)*")
 
-                st.write("📍 **Pinpoint Shop Location on Map***")
-                st.caption("Device GPS fetches location automatically. Click/Tap anywhere on the map to adjust pinpoint.")
+            reg_outside_photo = st.text_input("Outside Photo URL*", value="https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=400")
+            reg_inside_photo = st.text_input("Inside Photo URL*", value="https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=400")
 
-                loc_reg = get_geolocation()
-                init_lat, init_lon = 23.1780, 75.7890
-                if loc_reg and "coords" in loc_reg:
-                    init_lat = loc_reg["coords"]["latitude"]
-                    init_lon = loc_reg["coords"]["longitude"]
+            # MAP PINPOINT LOCATION SELECTION
+            st.write("📍 **Locate via Map (Pinpoint Location)***")
+            st.caption("Device GPS fetches location automatically. Click or pan on map to pinpoint exact shop location.")
 
-                picker_map = folium.Map(location=[st.session_state.reg_pin_lat, st.session_state.reg_pin_lon], zoom_start=15)
-                folium.Marker(
-                    [st.session_state.reg_pin_lat, st.session_state.reg_pin_lon],
-                    popup="Shop Pinpoint",
-                    draggable=True,
-                    icon=folium.Icon(color="red", icon="cut", prefix="fa")
-                ).add_to(picker_map)
+            loc_data = get_geolocation()
+            if loc_data and "coords" in loc_data:
+                st.session_state.reg_pin_lat = loc_data["coords"]["latitude"]
+                st.session_state.reg_pin_lon = loc_data["coords"]["longitude"]
 
-                map_click_data = st_folium(picker_map, width=700, height=300)
+            pin_map = folium.Map(location=[st.session_state.reg_pin_lat, st.session_state.reg_pin_lon], zoom_start=15)
+            folium.Marker(
+                [st.session_state.reg_pin_lat, st.session_state.reg_pin_lon],
+                popup="Your Shop Pinpoint",
+                icon=folium.Icon(color="red", icon="cut", prefix="fa")
+            ).add_to(pin_map)
 
-                if map_click_data and map_click_data.get("last_clicked"):
-                    st.session_state.reg_pin_lat = map_click_data["last_clicked"]["lat"]
-                    st.session_state.reg_pin_lon = map_click_data["last_clicked"]["lng"]
+            map_event = st_folium(pin_map, width=700, height=280)
 
-                if st.button("📌 Save Location Pinpoint"):
+            if map_event and map_event.get("last_clicked"):
+                st.session_state.reg_pin_lat = map_event["last_clicked"]["lat"]
+                st.session_state.reg_pin_lon = map_event["last_clicked"]["lng"]
+
+            col_pin1, col_pin2 = st.columns([2, 1])
+            with col_pin1:
+                st.write(f"Selected Pinpoint: `{st.session_state.reg_pin_lat:.4f}, {st.session_state.reg_pin_lon:.4f}`")
+            with col_pin2:
+                if st.button("📌 Save Pin Location"):
                     st.session_state.reg_location_saved = True
-                    st.success(f"Location Saved: ({st.session_state.reg_pin_lat:.4f}, {st.session_state.reg_pin_lon:.4f})")
+                    st.success("Location Saved!")
 
-                st.divider()
+            st.divider()
 
-                if st.button("Save & Register Shop", type="primary"):
-                    if not s_name.strip() or not s_address.strip():
-                        st.error("Please fill all compulsory star-marked fields!")
-                    elif not st.session_state.reg_location_saved:
-                        st.error("Please click 'Save Location Pinpoint' on map before submitting.")
-                    else:
-                        new_id = len(st.session_state.shops) + 1
-                        payments = []
-                        if p_offline: payments.append("Offline")
-                        if p_online: payments.append("Online")
+            # FINAL SAVE & SUBMIT
+            if st.button("Save & Register Shop", type="primary"):
+                if not st.session_state.reg_mobile_verified:
+                    st.session_state.show_unverified_error = True
+                    st.error("Submission Failed: Mobile number is not verified.")
+                    st.rerun()
+                elif not reg_shop_name.strip() or not reg_shop_address.strip() or not reg_owner_name.strip():
+                    st.error("Please fill all required fields marked with *")
+                elif not st.session_state.reg_location_saved:
+                    st.error("Please click 'Save Pin Location' on the map before submitting.")
+                else:
+                    new_shop_id = len(st.session_state.shops) + 1
+                    pay_methods = []
+                    if p_off: pay_methods.append("Offline Cash")
+                    if p_on: pay_methods.append("Online UPI/Card")
 
-                        v_mob = st.session_state.reg_verified_mobile_num
+                    verified_mob = st.session_state.reg_verified_mobile_num
 
-                        st.session_state.registered_owners[v_mob] = {
-                            "owner_name": o_name,
-                            "gender": o_gender,
-                            "age": o_age,
-                            "mobile": v_mob,
-                            "shop_name": s_name,
-                            "shop_name_hi": s_name,
-                            "payment": payments,
-                            "address": s_address,
-                            "lat": st.session_state.reg_pin_lat,
-                            "lon": st.session_state.reg_pin_lon,
-                            "shop_id": new_id
-                        }
+                    st.session_state.registered_owners[verified_mob] = {
+                        "owner_name": reg_owner_name,
+                        "gender": reg_gender,
+                        "age": reg_age,
+                        "mobile": verified_mob,
+                        "shop_name": reg_shop_name,
+                        "shop_name_hi": reg_shop_name,
+                        "payment": pay_methods,
+                        "address": reg_shop_address,
+                        "lat": st.session_state.reg_pin_lat,
+                        "lon": st.session_state.reg_pin_lon,
+                        "shop_id": new_shop_id
+                    }
 
-                        st.session_state.shops.append({
-                            "id": new_id,
-                            "name": s_name,
-                            "name_hi": s_name,
-                            "lat": st.session_state.reg_pin_lat,
-                            "lon": st.session_state.reg_pin_lon,
-                            "address": s_address,
-                            "address_hi": s_address,
-                            "distance": "1.0 km",
-                            "outside_photo": s_outside,
-                            "inside_photo": s_inside,
-                            "avg_time_per_cut": 20,
-                            "queue": []
-                        })
+                    st.session_state.shops.append({
+                        "id": new_shop_id,
+                        "name": reg_shop_name,
+                        "name_hi": reg_shop_name,
+                        "lat": st.session_state.reg_pin_lat,
+                        "lon": st.session_state.reg_pin_lon,
+                        "address": reg_shop_address,
+                        "address_hi": reg_shop_address,
+                        "distance": "0.8 km",
+                        "outside_photo": reg_outside_photo,
+                        "inside_photo": reg_inside_photo,
+                        "avg_time_per_cut": 20,
+                        "queue": []
+                    })
 
-                        st.session_state.owner_logged_in = True
-                        st.session_state.logged_owner_mobile = v_mob
-                        st.session_state.reg_mobile_verified = False
-                        st.session_state.reg_location_saved = False
-                        st.success("Shop Registered Successfully!")
-                        st.rerun()
+                    st.session_state.owner_logged_in = True
+                    st.session_state.logged_owner_mobile = verified_mob
+                    st.session_state.reg_mobile_verified = False
+                    st.session_state.reg_location_saved = False
+                    st.session_state.show_unverified_error = False
+                    st.session_state.otp_generated_code = None
+                    st.success("Shop Registered Successfully!")
+                    st.rerun()
 
     else:
         # LOGGED-IN SHOP OWNER DASHBOARD
