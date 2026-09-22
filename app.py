@@ -1,12 +1,22 @@
 import streamlit as st
 import folium
 from streamlit_folium import st_folium
-from streamlit_js_eval import get_geolocation
+from streamlit_js_eval import get_geolocation, streamlit_js_eval
 from math import radians, cos, sin, asin, sqrt
 import time
 import random
+import db  # Supabase persistence layer (see db.py)
 
 st.set_page_config(page_title="My Barber", page_icon="💈", layout="wide")
+
+# --- Browser localStorage helpers (per-device convenience, no account needed) ---
+def ls_get(key):
+    val = streamlit_js_eval(js_expressions=f"localStorage.getItem('{key}')", key=f"get_{key}")
+    return val
+
+def ls_set(key, value):
+    safe_value = str(value).replace("'", "\\'")
+    streamlit_js_eval(js_expressions=f"localStorage.setItem('{key}', '{safe_value}')", key=f"set_{key}_{value}")
 
 # Helper function to calculate exact distance in meters
 def calculate_haversine_distance(lat1, lon1, lat2, lon2):
@@ -26,12 +36,16 @@ def calculate_haversine_distance(lat1, lon1, lat2, lon2):
 if "app_language" not in st.session_state:
     st.session_state.app_language = "English"
 
+if "remembered_name" not in st.session_state:
+    remembered = ls_get("my_barber_profile_name")
+    st.session_state.remembered_name = remembered if remembered else "Guest"
+
 if "user_name" not in st.session_state:
-    st.session_state.user_name = "Rahul"
+    st.session_state.user_name = st.session_state.remembered_name
 
 if "user_profile" not in st.session_state:
     st.session_state.user_profile = {
-        "name": "Rahul",
+        "name": st.session_state.remembered_name,
         "age": "",
         "mobile": "",
         "email": "",
@@ -89,54 +103,16 @@ if "owner_logged_in" not in st.session_state:
 if "logged_owner_mobile" not in st.session_state:
     st.session_state.logged_owner_mobile = None
 
-if "registered_owners" not in st.session_state:
-    st.session_state.registered_owners = {
-        "9876543210": {
-            "owner_name": "Ramesh Kumar",
-            "gender": "Male",
-            "age": 34,
-            "mobile": "9876543210",
-            "shop_name": "Royal Cut Salon",
-            "shop_name_hi": "रॉयल कट सलून",
-            "payment": ["Offline Cash", "Online UPI/Card"],
-            "address": "Main Market, Clock Tower, Ujjain, Madhya Pradesh, India",
-            "lat": 23.1765,
-            "lon": 75.7885,
-            "shop_id": 1
-        }
-    }
-
-if "shops" not in st.session_state:
-    st.session_state.shops = [
-        {
-            "id": 1,
-            "owner_mobile": "9876543210",
-            "name": "Royal Cut Salon",
-            "name_hi": "रॉयल कट सलून",
-            "lat": 23.1765,
-            "lon": 75.7885,
-            "address": "Main Market, Clock Tower, Ujjain, MP, India",
-            "address_hi": "मुख्य बाजार, क्लॉक टावर, उज्जैन, म.प्र., भारत",
-            "outside_photo": "https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=400",
-            "inside_photo": "https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=400",
-            "avg_time_per_cut": 20,
-            "queue": ["Amit (Token #18)", "Vikas (Token #19)"]
-        },
-        {
-            "id": 2,
-            "owner_mobile": "9999999999",
-            "name": "Classic Barber Hub",
-            "name_hi": "क्लासिक बारबर हब",
-            "lat": 23.1810,
-            "lon": 75.7920,
-            "address": "Station Road, Opposite Bank, Ujjain, MP, India",
-            "address_hi": "स्टेशन रोड, बैंक के सामने, उज्जैन, म.प्र., भारत",
-            "outside_photo": "https://images.unsplash.com/photo-1622286342621-4bd786c2447c?w=400",
-            "inside_photo": "https://images.unsplash.com/photo-1599351431202-1e0f0137899a?w=400",
-            "avg_time_per_cut": 25,
-            "queue": ["Deepak (Token #11)", "Sanjay (Token #12)", "Pooja (Token #13)"]
-        }
-    ]
+# Shops, owners and the live queue now live in Supabase, not in memory.
+# Re-fetched on every rerun so all users see current data (no more resets on refresh).
+try:
+    _shops, _owners = db.load_shops_and_owners()
+    st.session_state.shops = _shops
+    st.session_state.registered_owners = _owners
+except Exception as e:
+    st.error(f"⚠️ Could not reach the database: {e}")
+    st.session_state.shops = st.session_state.get("shops", [])
+    st.session_state.registered_owners = st.session_state.get("registered_owners", {})
 
 # --- 2. GET CURRENT DEVICE GEOLOCATION ---
 loc_data = get_geolocation()
@@ -370,11 +346,14 @@ if nav_selection == T["nav_home"]:
                                 if reach_time is None:
                                     st.error("कृपया यात्रा समय दर्ज करें।" if is_hi else "Please enter travel time.")
                                 else:
-                                    for i in range(num_people):
-                                        t_num = start_token + i
-                                        label = f"{st.session_state.user_profile['name']} (Person {i+1}) (Token #{t_num})" if num_people > 1 else f"{st.session_state.user_profile['name']} (Token #{t_num})"
-                                        selected_shop["queue"].append(label)
-                                    
+                                    db.join_queue(
+                                        shop_id=selected_shop["id"],
+                                        customer_name=st.session_state.user_profile["name"],
+                                        start_token=start_token,
+                                        num_people=num_people,
+                                    )
+                                    ls_set("my_barber_profile_name", st.session_state.user_profile["name"])
+
                                     st.session_state.user_booking = {
                                         "shop_id": selected_shop["id"],
                                         "shop_name": s_title,
@@ -428,6 +407,7 @@ elif nav_selection == T["nav_about"]:
                         "address": new_address.strip()
                     }
                     st.session_state.user_name = new_name.strip()
+                    ls_set("my_barber_profile_name", new_name.strip())
                     st.session_state.profile_edit_mode = False
                     st.success("विवरण सहेजे गए!" if is_hi else "Details saved!")
                     st.rerun()
@@ -466,9 +446,7 @@ elif nav_selection == T["nav_appts"]:
             cancel_reason_app = st.text_input(T['cancel_reason'], key="cancel_app_input")
             if st.button(T['cancel_btn'], type="primary"):
                 if cancel_reason_app.strip():
-                    target_shop = next((s for s in st.session_state.shops if s["id"] == b["shop_id"]), None)
-                    if target_shop:
-                        target_shop["queue"] = [q for q in target_shop["queue"] if st.session_state.user_profile["name"] not in q]
+                    db.cancel_customer_booking(b["shop_id"], st.session_state.user_profile["name"])
                     st.session_state.user_booking = None
                     st.success("अपॉइंटमेंट रद्द हो गई।" if is_hi else "Appointment cancelled.")
                     st.rerun()
@@ -719,55 +697,40 @@ elif nav_selection == T["nav_owner"]:
                 elif not st.session_state.reg_location_saved:
                     st.error("Please click 'Confirm Shop Pin Location' on the map before submitting.")
                 else:
-                    new_shop_id = len(st.session_state.shops) + 1
-                    pay_methods = []
-                    if p_off: pay_methods.append("Offline Cash")
-                    if p_on: pay_methods.append("Online UPI/Card")
-
                     verified_mob = st.session_state.reg_verified_mobile_num
 
+                    # NOTE: the original app never actually uploaded the picked photos anywhere —
+                    # it always stored these same placeholder URLs. Real photo hosting would use
+                    # Supabase Storage; flagged in the README as a follow-up.
                     outside_url = "https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=400"
                     inside_url = "https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=400"
 
-                    st.session_state.registered_owners[verified_mob] = {
-                        "owner_name": reg_owner_name,
-                        "gender": reg_gender,
-                        "age": reg_age,
-                        "mobile": verified_mob,
-                        "shop_name": reg_shop_name,
-                        "shop_name_hi": reg_shop_name,
-                        "payment": pay_methods,
-                        "address": full_address_str,
-                        "lat": st.session_state.reg_shop_pin_lat,
-                        "lon": st.session_state.reg_shop_pin_lon,
-                        "shop_id": new_shop_id
-                    }
+                    try:
+                        db.register_shop(
+                            owner_name=reg_owner_name,
+                            gender=reg_gender,
+                            age=reg_age,
+                            mobile=verified_mob,
+                            shop_name=reg_shop_name,
+                            lat=st.session_state.reg_shop_pin_lat,
+                            lon=st.session_state.reg_shop_pin_lon,
+                            address=full_address_str,
+                            outside_photo_url=outside_url,
+                            inside_photo_url=inside_url,
+                        )
 
-                    st.session_state.shops.append({
-                        "id": new_shop_id,
-                        "owner_mobile": verified_mob,
-                        "name": reg_shop_name,
-                        "name_hi": reg_shop_name,
-                        "lat": st.session_state.reg_shop_pin_lat,
-                        "lon": st.session_state.reg_shop_pin_lon,
-                        "address": full_address_str,
-                        "address_hi": full_address_str,
-                        "outside_photo": outside_url,
-                        "inside_photo": inside_url,
-                        "avg_time_per_cut": 20,
-                        "queue": []
-                    })
-
-                    st.session_state.owner_logged_in = True
-                    st.session_state.logged_owner_mobile = verified_mob
-                    st.session_state.reg_mobile_verified = False
-                    st.session_state.reg_location_saved = False
-                    st.session_state.reg_outside_photo_img = None
-                    st.session_state.reg_inside_photo_img = None
-                    st.session_state.show_unverified_error = False
-                    st.session_state.otp_generated_code = None
-                    st.success("Shop Registered Successfully!")
-                    st.rerun()
+                        st.session_state.owner_logged_in = True
+                        st.session_state.logged_owner_mobile = verified_mob
+                        st.session_state.reg_mobile_verified = False
+                        st.session_state.reg_location_saved = False
+                        st.session_state.reg_outside_photo_img = None
+                        st.session_state.reg_inside_photo_img = None
+                        st.session_state.show_unverified_error = False
+                        st.session_state.otp_generated_code = None
+                        st.success("Shop Registered Successfully!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Could not save shop to the database: {e}")
 
     else:
         # LOGGED-IN SHOP OWNER DASHBOARD
@@ -795,17 +758,17 @@ elif nav_selection == T["nav_owner"]:
         with col_chair:
             st.subheader("💺 Active Chair Focus")
             if len(owner_shop["queue"]) > 0:
-                current_cust = owner_shop["queue"][0]
-                st.info(f"### Currently Serving: **{current_cust}**")
-                
+                current_entry = owner_shop["queue"][0]
+                st.info(f"### Currently Serving: **{current_entry['label']}**")
+
                 b_col1, b_col2, b_col3 = st.columns(3)
                 if b_col1.button("🟢 Completed / Next", use_container_width=True):
-                    finished = owner_shop["queue"].pop(0)
-                    st.toast(f"Completed service for {finished}!")
+                    db.complete_first_in_queue(current_entry["id"])
+                    st.toast(f"Completed service for {current_entry['label']}!")
                     st.rerun()
 
                 if b_col2.button("🟡 Customer Not Reached", use_container_width=True):
-                    st.warning(f"{current_cust} placed on 5-minute hold alert.")
+                    st.warning(f"{current_entry['label']} placed on 5-minute hold alert.")
 
                 if b_col3.button("🔴 Closing Soon", use_container_width=True):
                     st.error("Queue locked for new joins!")
@@ -815,9 +778,9 @@ elif nav_selection == T["nav_owner"]:
         with col_queue:
             st.subheader("📋 Waiting Queue")
             if len(owner_shop["queue"]) > 1:
-                for idx, person in enumerate(owner_shop["queue"][1:], start=1):
+                for idx, entry in enumerate(owner_shop["queue"][1:], start=1):
                     est_time = idx * owner_shop["avg_time_per_cut"]
-                    st.write(f"**{idx}. {person}** — *~{est_time} mins*")
+                    st.write(f"**{idx}. {entry['label']}** — *~{est_time} mins*")
             else:
                 st.write("Queue is empty.")
 
